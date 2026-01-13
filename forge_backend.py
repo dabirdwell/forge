@@ -14,293 +14,35 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CONFIGURATION (Config file > Environment Variables > Defaults)
+# CONFIGURATION (Environment Variable Overrides)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 FORGE_DIR = Path(__file__).parent
-CONFIG_FILE = FORGE_DIR / "forge_config.json"
-
-# Load config file if it exists
-_config = {}
-if CONFIG_FILE.exists():
-    try:
-        with open(CONFIG_FILE) as f:
-            _config = json.load(f)
-        print(f"📁 Loaded config from {CONFIG_FILE}")
-    except Exception as e:
-        print(f"⚠️ Failed to load config: {e}")
-
-def _get_config(key: str, env_var: str, default):
-    """Get config value from: config file > env var > default."""
-    if key in _config:
-        return _config[key]
-    return os.environ.get(env_var, default)
-
-OUTPUT_DIR = Path(_get_config('output_dir', 'FORGE_OUTPUT_DIR', FORGE_DIR / "output"))
-WORKFLOWS_DIR = Path(_get_config('workflows_dir', 'FORGE_WORKFLOWS_DIR', FORGE_DIR / "workflows"))
+OUTPUT_DIR = Path(os.environ.get('FORGE_OUTPUT_DIR', FORGE_DIR / "output"))
+WORKFLOWS_DIR = Path(os.environ.get('FORGE_WORKFLOWS_DIR', FORGE_DIR / "workflows"))
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# ComfyUI backend URL
-COMFYUI_URL = _get_config('comfyui_url', 'COMFYUI_URL', "http://127.0.0.1:8188")
+# ComfyUI backend URL - can be overridden with COMFYUI_URL env var
+COMFYUI_URL = os.environ.get('COMFYUI_URL', "http://127.0.0.1:8188")
 
-# Model search paths
+# Model search paths - extend via FORGE_MODEL_PATHS (colon-separated)
 _default_model_paths = [
     Path.home() / ".comfyui" / "models",
     Path.home() / "ComfyUI" / "models",
     FORGE_DIR / "models",
 ]
 
-# Add paths from config file
-if 'model_paths' in _config:
-    for p in _config['model_paths']:
-        path = Path(p).expanduser()
-        if path not in _default_model_paths:
-            _default_model_paths.append(path)
-
-# Add paths from environment variable
+# Add any paths from environment
 _extra_paths = os.environ.get('FORGE_MODEL_PATHS', '')
 if _extra_paths:
     for p in _extra_paths.split(':'):
         if p:
             _default_model_paths.append(Path(p))
 
-# Add common external drive locations if they exist
-_external_paths = [
-    Path("/Volumes/Mix Master Mike/Experimental Models/ComfyUI_Models"),
-]
-for p in _external_paths:
-    if p.exists():
-        _default_model_paths.append(p)
+# Users can add additional model paths via FORGE_MODEL_PATHS environment variable
+# Example: export FORGE_MODEL_PATHS="/path/to/models:/another/path"
 
 MODEL_SEARCH_PATHS = _default_model_paths
-
-
-def save_config(config_dict: dict):
-    """Save configuration to forge_config.json."""
-    try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config_dict, f, indent=2)
-        return True
-    except Exception as e:
-        print(f"Failed to save config: {e}")
-        return False
-
-
-def get_current_config() -> dict:
-    """Get current configuration as a dictionary."""
-    return {
-        "comfyui_url": COMFYUI_URL,
-        "output_dir": str(OUTPUT_DIR),
-        "model_paths": [str(p) for p in MODEL_SEARCH_PATHS],
-    }
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PRESETS / FAVORITES SYSTEM
-# ═══════════════════════════════════════════════════════════════════════════════
-
-PRESETS_FILE = FORGE_DIR / "forge_presets.json"
-
-@dataclass
-class Preset:
-    """A saved generation preset."""
-    name: str
-    tab: str  # "image", "video", "voice", "music"
-    prompt: str
-    model: str
-    # Image-specific
-    width: int = 1024
-    height: int = 1024
-    steps: int = 30
-    cfg: float = 7.0
-    seed: int = -1
-    # Video-specific
-    frames: int = 49
-    motion: float = 1.0
-    # Voice-specific
-    voice_mode: str = "quick"
-    speed: float = 1.0
-    pitch: int = 0
-    # Music-specific
-    duration: int = 30
-    style_tags: List[str] = field(default_factory=list)
-    # Metadata
-    created: str = ""
-    thumbnail: str = ""  # Path to thumbnail image
-
-    def to_dict(self) -> dict:
-        return {
-            "name": self.name,
-            "tab": self.tab,
-            "prompt": self.prompt,
-            "model": self.model,
-            "width": self.width,
-            "height": self.height,
-            "steps": self.steps,
-            "cfg": self.cfg,
-            "seed": self.seed,
-            "frames": self.frames,
-            "motion": self.motion,
-            "voice_mode": self.voice_mode,
-            "speed": self.speed,
-            "pitch": self.pitch,
-            "duration": self.duration,
-            "style_tags": self.style_tags,
-            "created": self.created,
-            "thumbnail": self.thumbnail,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Preset':
-        return cls(
-            name=data.get("name", "Untitled"),
-            tab=data.get("tab", "image"),
-            prompt=data.get("prompt", ""),
-            model=data.get("model", ""),
-            width=data.get("width", 1024),
-            height=data.get("height", 1024),
-            steps=data.get("steps", 30),
-            cfg=data.get("cfg", 7.0),
-            seed=data.get("seed", -1),
-            frames=data.get("frames", 49),
-            motion=data.get("motion", 1.0),
-            voice_mode=data.get("voice_mode", "quick"),
-            speed=data.get("speed", 1.0),
-            pitch=data.get("pitch", 0),
-            duration=data.get("duration", 30),
-            style_tags=data.get("style_tags", []),
-            created=data.get("created", ""),
-            thumbnail=data.get("thumbnail", ""),
-        )
-
-
-def load_presets() -> List[Preset]:
-    """Load all presets from file."""
-    if not PRESETS_FILE.exists():
-        return []
-    try:
-        with open(PRESETS_FILE) as f:
-            data = json.load(f)
-        return [Preset.from_dict(p) for p in data.get("presets", [])]
-    except Exception as e:
-        print(f"Failed to load presets: {e}")
-        return []
-
-
-def save_presets(presets: List[Preset]) -> bool:
-    """Save all presets to file."""
-    try:
-        data = {"presets": [p.to_dict() for p in presets]}
-        with open(PRESETS_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-        return True
-    except Exception as e:
-        print(f"Failed to save presets: {e}")
-        return False
-
-
-def add_preset(preset: Preset) -> bool:
-    """Add a new preset."""
-    presets = load_presets()
-    # Add timestamp if not set
-    if not preset.created:
-        from datetime import datetime
-        preset.created = datetime.now().isoformat()
-    presets.append(preset)
-    return save_presets(presets)
-
-
-def delete_preset(name: str) -> bool:
-    """Delete a preset by name."""
-    presets = load_presets()
-    presets = [p for p in presets if p.name != name]
-    return save_presets(presets)
-
-
-def get_presets_for_tab(tab: str) -> List[Preset]:
-    """Get presets filtered by tab."""
-    return [p for p in load_presets() if p.tab == tab]
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# BATCH GENERATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class BatchJob:
-    """A single job in a batch generation queue."""
-    id: int
-    prompt: str
-    seed: int
-    status: str = "pending"  # pending, running, completed, failed
-    output_path: Optional[str] = None
-    error: Optional[str] = None
-
-
-@dataclass
-class BatchConfig:
-    """Configuration for batch generation."""
-    model: str
-    width: int
-    height: int
-    steps: int
-    cfg: float
-    # Batch settings
-    num_images: int = 4
-    seed_mode: str = "random"  # "random", "sequential", "fixed"
-    base_seed: int = -1
-    prompt_variations: List[str] = field(default_factory=list)  # Optional prompt variations
-
-
-def create_batch_jobs(config: BatchConfig, base_prompt: str) -> List[BatchJob]:
-    """Create a list of batch jobs based on configuration.
-
-    Args:
-        config: Batch configuration with model settings and batch options
-        base_prompt: The base prompt to use (may be varied)
-
-    Returns:
-        List of BatchJob objects ready for processing
-    """
-    import random
-
-    jobs = []
-    prompts = config.prompt_variations if config.prompt_variations else [base_prompt]
-
-    # Generate seeds based on mode
-    if config.seed_mode == "fixed" and config.base_seed >= 0:
-        seeds = [config.base_seed] * config.num_images
-    elif config.seed_mode == "sequential" and config.base_seed >= 0:
-        seeds = [config.base_seed + i for i in range(config.num_images)]
-    else:  # random
-        seeds = [random.randint(0, 2**32-1) for _ in range(config.num_images)]
-
-    # Create jobs - cycle through prompts if fewer than num_images
-    for i in range(config.num_images):
-        prompt = prompts[i % len(prompts)]
-        jobs.append(BatchJob(
-            id=i,
-            prompt=prompt,
-            seed=seeds[i],
-        ))
-
-    return jobs
-
-
-def get_batch_status(jobs: List[BatchJob]) -> dict:
-    """Get summary status of batch jobs.
-
-    Returns:
-        Dict with counts: pending, running, completed, failed, total
-    """
-    return {
-        "pending": sum(1 for j in jobs if j.status == "pending"),
-        "running": sum(1 for j in jobs if j.status == "running"),
-        "completed": sum(1 for j in jobs if j.status == "completed"),
-        "failed": sum(1 for j in jobs if j.status == "failed"),
-        "total": len(jobs),
-    }
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SYSTEM DETECTION
@@ -313,7 +55,7 @@ class SystemInfo:
     ram_gb: int
     chip: str
     tier: str  # "studio", "pro", "lite"
-
+    
     @classmethod
     def detect(cls) -> "SystemInfo":
         try:
@@ -321,7 +63,7 @@ class SystemInfo:
             ram_gb = int(result.stdout.strip()) // (1024**3)
         except:
             ram_gb = 8
-
+        
         try:
             result = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True)
             chip = result.stdout.strip()
@@ -329,101 +71,13 @@ class SystemInfo:
                 chip = chip.replace("Apple ", "")
         except:
             chip = "Unknown"
-
-        # Detect machine type from chip name and model identifier
-        machine = "Mac"
-        try:
-            # Try to get actual hardware model
-            result = subprocess.run(["sysctl", "-n", "hw.model"], capture_output=True, text=True)
-            model = result.stdout.strip().lower()
-            if "macbookpro" in model:
-                machine = "MacBook Pro"
-            elif "macbookair" in model:
-                machine = "MacBook Air"
-            elif "macmini" in model:
-                machine = "Mac mini"
-            elif "macstudio" in model:
-                machine = "Mac Studio"
-            elif "macpro" in model:
-                machine = "Mac Pro"
-            elif "imac" in model:
-                machine = "iMac"
-        except:
-            # Fallback: guess from chip name
-            if "Ultra" in chip or "Max" in chip:
-                machine = "Mac Studio" if ram_gb >= 64 else "MacBook Pro"
-            elif "Pro" in chip:
-                machine = "MacBook Pro"
-            elif "M1" in chip or "M2" in chip or "M3" in chip or "M4" in chip:
-                machine = "MacBook Air"
-
-        # Tier based on RAM (what models can you realistically run)
+        
         if ram_gb >= 48:
-            tier = "studio"  # Can run everything
+            return cls("Mac Studio", ram_gb, chip, "studio")
         elif ram_gb >= 16:
-            tier = "pro"     # Can run most things
+            return cls("MacBook Pro", ram_gb, chip, "pro")
         else:
-            tier = "lite"    # Limited to smaller models
-
-        return cls(machine, ram_gb, chip, tier)
-
-    def get_available_memory_gb(self) -> float:
-        """Get currently available memory (not just total RAM).
-
-        On Apple Silicon, unified memory is shared between CPU and GPU,
-        so we check actual availability, not just total.
-        """
-        try:
-            import platform
-            if platform.system() == "Darwin":
-                # macOS: use vm_stat for memory pressure info
-                result = subprocess.run(["vm_stat"], capture_output=True, text=True)
-                lines = result.stdout.strip().split("\n")
-
-                # Parse page size
-                page_size = 4096  # default
-                for line in lines:
-                    if "page size of" in line:
-                        page_size = int(line.split()[-2])
-                        break
-
-                # Parse free + inactive pages (available for use)
-                free_pages = 0
-                inactive_pages = 0
-                for line in lines:
-                    if line.startswith("Pages free:"):
-                        free_pages = int(line.split()[2].replace(".", ""))
-                    elif line.startswith("Pages inactive:"):
-                        inactive_pages = int(line.split()[2].replace(".", ""))
-
-                available_bytes = (free_pages + inactive_pages) * page_size
-                return available_bytes / (1024**3)
-            else:
-                # Linux/other: try /proc/meminfo
-                with open("/proc/meminfo") as f:
-                    for line in f:
-                        if line.startswith("MemAvailable:"):
-                            kb = int(line.split()[1])
-                            return kb / (1024**2)
-        except Exception:
-            pass
-
-        # Fallback: assume 60% of total RAM is available
-        return self.ram_gb * 0.6
-
-    def get_memory_pressure(self) -> str:
-        """Get current memory pressure level: 'low', 'medium', 'high', 'critical'."""
-        available = self.get_available_memory_gb()
-        ratio = available / self.ram_gb
-
-        if ratio > 0.4:
-            return "low"
-        elif ratio > 0.25:
-            return "medium"
-        elif ratio > 0.1:
-            return "high"
-        else:
-            return "critical"
+            return cls("Mac", ram_gb, chip, "lite")
 
 # Global system info
 SYSTEM = SystemInfo.detect()
@@ -442,143 +96,44 @@ class Model:
     tier_required: str  # "lite", "pro", "studio"
     media_type: str = "unknown"  # "image", "video", "speech", "music"
     description: str = ""
-    vram_required_gb: float = 0.0  # Estimated VRAM/unified memory needed
-    backend_mode: str = "comfyui"  # "comfyui" or "direct" - how to run the model
-
+    works_on_mac: bool = True  # Whether it works on Apple Silicon
+    
     def available_on_system(self) -> bool:
-        """Check if model can run on this hardware (static check)."""
+        """Check if model is available on current system (tier AND platform)."""
         tiers = {"lite": 0, "pro": 1, "studio": 2}
-        return tiers.get(SYSTEM.tier, 0) >= tiers.get(self.tier_required, 0)
-
-    def can_run_now(self) -> tuple[bool, str]:
-        """Check if model can run RIGHT NOW given current memory.
-
-        Returns: (can_run, reason)
-        """
-        available = SYSTEM.get_available_memory_gb()
-        required = self.vram_required_gb
-
-        if required <= 0:
-            # No estimate available, assume it's fine
-            return True, "Memory requirements unknown"
-
-        # Leave 2GB headroom for system
-        usable = available - 2.0
-
-        if usable >= required:
-            headroom = usable - required
-            if headroom > 4:
-                return True, f"Plenty of room ({available:.1f}GB available)"
-            else:
-                return True, f"Should work ({available:.1f}GB available, needs ~{required:.1f}GB)"
-        elif usable >= required * 0.8:
-            return True, f"Tight fit - may be slow ({available:.1f}GB available, needs ~{required:.1f}GB)"
-        else:
-            return False, f"Not enough memory ({available:.1f}GB available, needs ~{required:.1f}GB)"
-
-    def memory_status(self) -> str:
-        """Get a short status string for UI: 'ok', 'tight', 'warning', 'no'."""
-        can_run, _ = self.can_run_now()
-        if not can_run:
-            return "no"
-
-        available = SYSTEM.get_available_memory_gb()
-        required = self.vram_required_gb
-        if required <= 0:
-            return "ok"
-
-        ratio = available / required
-        if ratio > 2.0:
-            return "ok"
-        elif ratio > 1.3:
-            return "tight"
-        else:
-            return "warning"
+        tier_ok = tiers.get(SYSTEM.tier, 0) >= tiers.get(self.tier_required, 0)
+        # On Mac, also check Mac compatibility
+        is_mac = "apple" in SYSTEM.chip.lower() or "m1" in SYSTEM.chip.lower() or "m2" in SYSTEM.chip.lower() or "m3" in SYSTEM.chip.lower() or "m4" in SYSTEM.chip.lower()
+        if is_mac and not self.works_on_mac:
+            return False
+        return tier_ok
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MEMORY ESTIMATION
-# ═══════════════════════════════════════════════════════════════════════════════
+@dataclass
+class LoRA:
+    """A discovered LoRA model."""
+    name: str
+    path: Path
+    size_mb: float
+    compatible_with: str = "unknown"  # "sdxl", "sd15", "flux", "ltx", etc.
+    description: str = ""
 
-# Memory multipliers by architecture type
-# These are empirical estimates for peak memory during inference
-MEMORY_MULTIPLIERS = {
-    # Image models - file size × multiplier = peak VRAM
-    "sdxl": 1.2,        # SDXL needs ~1.2x file size
-    "sd15": 1.1,        # SD 1.5 is efficient
-    "flux": 1.4,        # FLUX is memory hungry
-    "dreamshaper": 1.2,
-    "realvis": 1.2,
-    "lightning": 1.0,   # Lightning is optimized
+    @classmethod
+    def detect_compatibility(cls, filename: str) -> str:
+        """Guess LoRA compatibility from filename."""
+        name_lower = filename.lower()
+        if "sdxl" in name_lower or "xl" in name_lower:
+            return "sdxl"
+        if "sd15" in name_lower or "sd1.5" in name_lower or "sd-1" in name_lower:
+            return "sd15"
+        if "flux" in name_lower:
+            return "flux"
+        if "ltx" in name_lower:
+            return "ltx"
+        if "wan" in name_lower:
+            return "wan"
+        return "unknown"
 
-    # Video models - more complex, need more overhead
-    "ltxv": 1.8,        # LTX-Video needs significant overhead for temporal
-    "ltx2": 2.0,        # LTX-2 even more
-    "wan": 2.5,         # Wan is memory intensive
-    "hunyuan": 2.0,
-
-    # Audio/TTS models
-    "chatterbox": 1.3,
-    "xtts": 1.4,         # Coqui XTTS
-    "f5tts": 1.3,        # F5-TTS
-    "bark": 2.0,         # Bark is memory hungry
-    "tortoise": 2.5,     # TorToise is slow but quality
-    "styletts": 1.2,     # StyleTTS2
-
-    # Music/Audio models
-    "musicgen": 1.5,       # MusicGen small-medium
-    "musicgen_large": 2.5, # MusicGen large
-    "stable_audio": 1.8,   # Stable Audio Open
-    "audiocraft": 2.0,     # Meta AudioCraft
-    "riffusion": 1.2,      # Riffusion (SD-based)
-    "audioldm": 1.5,       # AudioLDM
-    "audioldm2": 2.0,      # AudioLDM2
-
-    # Default
-    "unknown": 1.5,
-}
-
-# Some models need additional components loaded
-ADDITIONAL_MEMORY = {
-    # Video models load VAE + text encoder separately
-    "ltxv": 1.5,   # T5 encoder + VAE
-    "ltx2": 2.0,
-    "wan": 3.0,    # Large text encoder
-
-    # FLUX needs T5
-    "flux": 2.0,
-}
-
-
-def estimate_memory_required(model_path: Path, family: str) -> float:
-    """Estimate memory required to run a model.
-
-    Args:
-        model_path: Path to the model file
-        family: Model family (sdxl, flux, ltxv, etc.)
-
-    Returns:
-        Estimated GB of memory required for inference
-    """
-    try:
-        file_size_gb = model_path.stat().st_size / (1024**3)
-    except (FileNotFoundError, OSError):
-        return 0.0
-
-    # Base memory from file size
-    multiplier = MEMORY_MULTIPLIERS.get(family, MEMORY_MULTIPLIERS["unknown"])
-    base_memory = file_size_gb * multiplier
-
-    # Add overhead for additional components
-    additional = ADDITIONAL_MEMORY.get(family, 0.0)
-
-    # Add fixed overhead for ComfyUI/Python runtime (~1.5GB)
-    runtime_overhead = 1.5
-
-    total = base_memory + additional + runtime_overhead
-
-    # Round to 1 decimal
-    return round(total, 1)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SPECIFIC MODEL DESCRIPTIONS
@@ -606,14 +161,18 @@ SPECIFIC_MODEL_INFO = {
         "desc": "Original LTX-Video. Smooth 3-second clips, reliable motion. The classic."
     },
     
-    # LTX-2 variants (newer, larger)
+    # LTX-2 variants (newer, larger) - requires Gemma text encoder
     "ltx-2-19b-dev-fp8": {
         "family": "ltx2", "type": "video",
-        "desc": "Best quality LTX (19B params). Stunning detail but needs 48GB+ RAM. For final renders."
+        "desc": "Best quality LTX (19B). Needs Gemma encoder + 48GB+ RAM. Stunning detail."
+    },
+    "ltx-2-19b-distilled-fp8": {
+        "family": "ltx2", "type": "video",
+        "desc": "Faster LTX-2. Needs Gemma encoder. Quicker than dev version."
     },
     "ltx-2-19b-distilled": {
         "family": "ltx2", "type": "video",
-        "desc": "Faster LTX-2. Still needs lots of RAM but quicker than dev version."
+        "desc": "Faster LTX-2 (full precision). Needs Gemma encoder + lots of RAM."
     },
     "ltx-2-spatial-upscaler": {
         "family": "ltx2", "type": "video",
@@ -622,46 +181,46 @@ SPECIFIC_MODEL_INFO = {
     
     # Wan variants - cinematic quality (NOTE: Not working on Mac MPS due to fp8 text encoder issues)
     "wan2.1-t2v-14b": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Wan 2.1 text-to-video (14B). Cinematic. ⚠️ Not yet working on Mac."
     },
     # Wan 2.2 variants (NOTE: Not working on Mac MPS due to fp8 text encoder issues)
     "wan2.2-t2v-1920": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Cinematic 1080p video. Stunning but slow. ⚠️ Not yet working on Mac."
     },
     "wan2.2-t2v-720": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "720p Wan video. Beautiful motion, reasonable speed. ⚠️ Not yet working on Mac."
     },
     "wan2.2-t2v-rapid": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Fastest Wan text-to-video. Quick tests. ⚠️ Not yet working on Mac."
     },
     "wan2.2-i2v-rapid": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Animate any image fast. ⚠️ Not yet working on Mac."
     },
     "wan2.2-i2v-720": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Image-to-video at 720p. ⚠️ Not yet working on Mac."
     },
     
     # Wan 2.1 variants - lighter weight (NOTE: Not working on Mac MPS due to fp8 text encoder issues)
     "wan2.1_t2v_1.3B": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Lightweight Wan (1.3B). Only 8GB VRAM! ⚠️ Not yet working on Mac (fp8 encoder issue)."
     },
     "wan2.1_t2v_14B": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Full Wan 2.1 (14B). Cinematic quality, needs 40GB+ VRAM. ⚠️ Not yet working on Mac."
     },
     "wan2.1_i2v_480p": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Wan 2.1 image-to-video at 480p. ⚠️ Not yet working on Mac."
     },
     "wan2.1_i2v_720p": {
-        "family": "wan", "type": "video",
+        "family": "wan", "type": "video", "mac": False,
         "desc": "Wan 2.1 image-to-video at 720p. ⚠️ Not yet working on Mac."
     },
     
@@ -734,35 +293,142 @@ SPECIFIC_MODEL_INFO = {
 
 # Family fallbacks (if specific model not matched)
 FAMILY_FALLBACKS = {
-    # Video
     "ltx2": {"type": "video", "desc": "LTX-2 video model. Fast text-to-video generation."},
     "ltxv": {"type": "video", "desc": "Original LTX Video. Reliable motion generation."},
     "wan": {"type": "video", "desc": "Wan video model. High-quality motion and composition."},
     "hunyuan": {"type": "video", "desc": "Tencent's video model. Good quality, moderate speed."},
-    # Image
     "sdxl": {"type": "image", "desc": "SDXL image model. High-res, versatile generation."},
     "dreamshaper": {"type": "image", "desc": "Artistic, painterly style. Great for fantasy."},
     "realvis": {"type": "image", "desc": "Photorealistic images. Best for lifelike results."},
     "flux": {"type": "image", "desc": "Latest generation. Best prompt following and quality."},
     "sd15": {"type": "image", "desc": "Classic SD 1.5. Fast, lightweight, huge community."},
-    # Speech/TTS
-    "chatterbox": {"type": "speech", "desc": "Voice cloning TTS. Expression tags, two quality modes.", "backend": "direct"},
-    "xtts": {"type": "speech", "desc": "Coqui XTTS. Multilingual voice cloning, natural prosody.", "backend": "comfyui"},
-    "f5tts": {"type": "speech", "desc": "F5-TTS. Fast, high-quality zero-shot voice cloning.", "backend": "comfyui"},
-    "bark": {"type": "speech", "desc": "Bark by Suno. Expressive with laughs, music, effects.", "backend": "comfyui"},
-    "tortoise": {"type": "speech", "desc": "TorToise TTS. Slow but exceptional quality.", "backend": "comfyui"},
-    "styletts": {"type": "speech", "desc": "StyleTTS2. Fast, natural-sounding synthesis.", "backend": "comfyui"},
-    # Music/Audio
-    "musicgen": {"type": "music", "desc": "Meta MusicGen. Text-to-music, melody conditioning.", "backend": "comfyui"},
-    "musicgen_large": {"type": "music", "desc": "MusicGen Large. Higher quality, longer generations.", "backend": "comfyui"},
-    "stable_audio": {"type": "music", "desc": "Stability AI. Music + sound effects, variable length.", "backend": "comfyui"},
-    "audiocraft": {"type": "music", "desc": "Meta AudioCraft. Full audio generation suite.", "backend": "comfyui"},
-    "riffusion": {"type": "music", "desc": "Riffusion. Real-time music from spectrograms.", "backend": "comfyui"},
-    "audioldm": {"type": "music", "desc": "AudioLDM. Text-to-audio, sound effects.", "backend": "comfyui"},
-    "audioldm2": {"type": "music", "desc": "AudioLDM2. Improved quality, speech + music.", "backend": "comfyui"},
-    # Unknown
+    "chatterbox": {"type": "speech", "desc": "Voice cloning text-to-speech."},
+    "musicgen": {"type": "music", "desc": "Text-to-music generation."},
     "unknown": {"type": "unknown", "desc": "Unrecognized model."},
 }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RECOMMENDED MODELS CATALOG
+# Models users can download, with RAM requirements and download info
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class RecommendedModel:
+    """A model available for download."""
+    name: str
+    type: str  # image, video, speech, music
+    size_gb: float
+    min_ram_gb: int  # Minimum RAM to run comfortably
+    description: str
+    url: str  # HuggingFace or CivitAI URL
+    filename: str  # Expected filename after download
+    priority: int = 5  # 1-10, higher = recommend more strongly
+    works_on_mac: bool = True  # Whether it works on Apple Silicon
+
+RECOMMENDED_MODELS = [
+    # ─────────────────────────────────────────────────────────────────────────
+    # IMAGE MODELS
+    # ─────────────────────────────────────────────────────────────────────────
+    RecommendedModel(
+        name="FLUX.1 Schnell",
+        type="image",
+        size_gb=12.0,
+        min_ram_gb=16,
+        description="Latest generation. Best prompt understanding, fast generation.",
+        url="https://huggingface.co/black-forest-labs/FLUX.1-schnell",
+        filename="flux1-schnell",
+        priority=9,
+    ),
+    RecommendedModel(
+        name="DreamShaper XL",
+        type="image",
+        size_gb=6.5,
+        min_ram_gb=12,
+        description="Artistic, painterly style. Great for fantasy and portraits.",
+        url="https://civitai.com/models/112902/dreamshaper-xl",
+        filename="dreamshaperXL",
+        priority=8,
+    ),
+    RecommendedModel(
+        name="Realistic Vision 6.0",
+        type="image",
+        size_gb=2.0,
+        min_ram_gb=8,
+        description="Photorealistic people and scenes. Fast SD 1.5 based.",
+        url="https://civitai.com/models/4201/realistic-vision-v60",
+        filename="realisticVision",
+        priority=7,
+    ),
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # VIDEO MODELS
+    # ─────────────────────────────────────────────────────────────────────────
+    RecommendedModel(
+        name="LTX-Video Distilled",
+        type="video",
+        size_gb=4.0,
+        min_ram_gb=16,
+        description="Fast 3-second video clips. Best balance of speed and quality.",
+        url="https://huggingface.co/Lightricks/LTX-Video",
+        filename="ltxv-2b-0.9.8-distilled",
+        priority=9,
+    ),
+    RecommendedModel(
+        name="LTX-Video FP8",
+        type="video",
+        size_gb=2.5,
+        min_ram_gb=12,
+        description="Fastest video generation. Great for quick iterations.",
+        url="https://huggingface.co/Lightricks/LTX-Video",
+        filename="ltxv-2b-0.9.8-distilled-fp8",
+        priority=8,
+    ),
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # SPEECH MODELS  
+    # ─────────────────────────────────────────────────────────────────────────
+    RecommendedModel(
+        name="Chatterbox TTS",
+        type="speech",
+        size_gb=1.5,
+        min_ram_gb=8,
+        description="Voice cloning text-to-speech. Clone any voice with 10s sample.",
+        url="https://huggingface.co/ResembleAI/chatterbox",
+        filename="chatterbox",
+        priority=7,
+    ),
+]
+
+def get_recommended_models(ram_gb: int = None, exclude_installed: List[str] = None) -> List[RecommendedModel]:
+    """Get models recommended for the current system.
+    
+    Args:
+        ram_gb: Available RAM in GB (defaults to system RAM)
+        exclude_installed: List of installed model filenames to exclude
+    
+    Returns:
+        List of RecommendedModel sorted by priority
+    """
+    if ram_gb is None:
+        ram_gb = SYSTEM.ram_gb
+    if exclude_installed is None:
+        exclude_installed = []
+    
+    # Normalize exclusion list
+    exclude_lower = [f.lower() for f in exclude_installed]
+    
+    recommendations = []
+    for model in RECOMMENDED_MODELS:
+        # Skip if already installed
+        if any(model.filename.lower() in exc for exc in exclude_lower):
+            continue
+        # Skip if system can't run it
+        if model.min_ram_gb > ram_gb:
+            continue
+        recommendations.append(model)
+    
+    # Sort by priority (highest first)
+    return sorted(recommendations, key=lambda m: m.priority, reverse=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MODEL CLASSIFICATION
@@ -791,38 +457,23 @@ def classify_model(filepath: Path) -> Dict[str, Any]:
                 "type": info["type"],
                 "tier": tier,
                 "desc": info["desc"],
-                "backend": info.get("backend", "comfyui"),
+                "mac": info.get("mac", True)  # Default to True if not specified
             }
     
     # Second: Fall back to family detection
     family_patterns = [
-        # Video
         (["ltx-2", "ltx2"], "ltx2"),
         (["ltxv", "ltx-video"], "ltxv"),
         (["wan"], "wan"),
         (["hunyuan"], "hunyuan"),
-        # Image
         (["flux"], "flux"),
         (["dreamshaper"], "dreamshaper"),
         (["realvis", "realisticvision", "realistic_vision"], "realvis"),
         (["sdxl", "sd_xl"], "sdxl"),
         (["sd_", "sd1", "sd-1"], "sd15"),
         (["lightning"], "lightning"),
-        # Speech/TTS
         (["chatterbox"], "chatterbox"),
-        (["xtts", "coqui"], "xtts"),
-        (["f5-tts", "f5tts", "f5_tts"], "f5tts"),
-        (["bark"], "bark"),
-        (["tortoise"], "tortoise"),
-        (["styletts", "style-tts"], "styletts"),
-        # Music/Audio
-        (["musicgen-large", "musicgen_large"], "musicgen_large"),
         (["musicgen"], "musicgen"),
-        (["stable-audio", "stable_audio", "stableaudio"], "stable_audio"),
-        (["audiocraft"], "audiocraft"),
-        (["riffusion"], "riffusion"),
-        (["audioldm2", "audioldm-2"], "audioldm2"),
-        (["audioldm"], "audioldm"),
     ]
     
     for patterns, family in family_patterns:
@@ -833,16 +484,16 @@ def classify_model(filepath: Path) -> Dict[str, Any]:
                 "type": fallback["type"],
                 "tier": tier,
                 "desc": fallback["desc"],
-                "backend": fallback.get("backend", "comfyui"),
+                "mac": True  # Family fallbacks default to working on Mac
             }
-
+    
     # Unknown model
     return {
         "family": "unknown",
         "type": "unknown",
-        "backend": "comfyui",
         "tier": tier,
-        "desc": FAMILY_FALLBACKS["unknown"]["desc"]
+        "desc": FAMILY_FALLBACKS["unknown"]["desc"],
+        "mac": True
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -899,12 +550,6 @@ def discover_all_models() -> Dict[str, List[Model]]:
                 except (FileNotFoundError, OSError):
                     continue
                 
-                # Estimate memory requirement
-                vram_required = estimate_memory_required(filepath, info["family"])
-
-                # Determine backend mode (comfyui vs direct)
-                backend = info.get("backend", "comfyui")
-
                 model = Model(
                     name=filepath.stem,
                     path=filepath,
@@ -913,28 +558,51 @@ def discover_all_models() -> Dict[str, List[Model]]:
                     tier_required=info["tier"],
                     media_type=info["type"],
                     description=info.get("desc", ""),
-                    backend_mode=backend,
-                    vram_required_gb=vram_required,
+                    works_on_mac=info.get("mac", True)
                 )
                 models[info["type"]].append(model)
-
-    # Add built-in Chatterbox TTS (loads from HuggingFace, always available)
-    # This is the "Direct Mode" fallback - doesn't need ComfyUI
-    chatterbox_model = Model(
-        name="Chatterbox TTS",
-        path=Path("~/.cache/huggingface"),  # Placeholder - loads from HF
-        family="chatterbox",
-        size_gb=2.0,  # Approximate total size of both models
-        tier_required="lite",
-        media_type="speech",
-        description="Built-in voice cloning. Expression tags [laugh] [sigh]. No setup needed.",
-        backend_mode="direct",
-        vram_required_gb=3.5,  # ~2GB model + overhead
-    )
-    # Insert at beginning so it's the default
-    models["speech"].insert(0, chatterbox_model)
-
+    
     return models
+
+
+def discover_loras() -> List[LoRA]:
+    """Discover all LoRA models in the loras directory."""
+    loras = []
+    seen = set()
+
+    # Look in all model search paths for loras subdirectory
+    lora_dirs = []
+    for search_path in MODEL_SEARCH_PATHS:
+        lora_dir = search_path / "loras"
+        if lora_dir.exists():
+            lora_dirs.append(lora_dir)
+
+    for lora_dir in lora_dirs:
+        if not lora_dir.exists():
+            continue
+
+        for pattern in ["**/*.safetensors", "**/*.ckpt", "**/*.pt"]:
+            for filepath in lora_dir.glob(pattern):
+                if filepath.name in seen:
+                    continue
+                seen.add(filepath.name)
+
+                # Skip broken symlinks
+                try:
+                    file_size = filepath.stat().st_size / (1024**2)  # MB
+                except (FileNotFoundError, OSError):
+                    continue
+
+                lora = LoRA(
+                    name=filepath.stem,
+                    path=filepath,
+                    size_mb=file_size,
+                    compatible_with=LoRA.detect_compatibility(filepath.stem),
+                )
+                loras.append(lora)
+
+    return sorted(loras, key=lambda x: x.name.lower())
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMFYUI BACKEND
@@ -1139,11 +807,12 @@ def enhance_prompt(prompt: str, style: str = "auto") -> str:
 # IMAGE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def generate_image(prompt_text: str, model_name: str, width: int, height: int, 
+def generate_image(prompt_text: str, model_name: str, width: int, height: int,
                    steps: int, cfg: float, seed: int,
+                   lora_name: Optional[str] = None, lora_strength: float = 1.0,
                    progress_callback=None) -> tuple[Optional[str], str]:
     """Generate an image using ComfyUI.
-    
+
     Args:
         prompt_text: The generation prompt
         model_name: Name of the model to use
@@ -1152,8 +821,10 @@ def generate_image(prompt_text: str, model_name: str, width: int, height: int,
         steps: Number of sampling steps (quality)
         cfg: CFG scale (creativity - higher = more literal)
         seed: Random seed (-1 for random)
+        lora_name: Optional LoRA filename to apply
+        lora_strength: LoRA strength (0.0 to 1.0, default 1.0)
         progress_callback: Optional callback(GenerationProgress) for real-time updates
-    
+
     Returns:
         Tuple of (output_path or None, status_message)
     """
@@ -1232,7 +903,43 @@ def generate_image(prompt_text: str, model_name: str, width: int, height: int,
         elif cls == "CLIPTextEncode":
             if node_id == "6":  # Positive prompt node
                 inputs["text"] = prompt_text
-    
+
+    # Inject LoRA if specified
+    if lora_name:
+        # Find the LoRA file
+        lora_file = None
+        for search_path in MODEL_SEARCH_PATHS:
+            lora_dir = search_path / "loras"
+            if lora_dir.exists():
+                for fp in lora_dir.glob("**/*.safetensors"):
+                    if lora_name in fp.name or lora_name == fp.stem:
+                        lora_file = fp.name
+                        break
+            if lora_file:
+                break
+
+        if lora_file:
+            # Add LoraLoader node - inserts between checkpoint and sampler/clip
+            # Node structure: checkpoint(4) -> lora(10) -> sampler(3), clip(6,7)
+            workflow["10"] = {
+                "class_type": "LoraLoader",
+                "inputs": {
+                    "lora_name": lora_file,
+                    "strength_model": float(lora_strength),
+                    "strength_clip": float(lora_strength),
+                    "model": ["4", 0],  # Connect to checkpoint model output
+                    "clip": ["4", 1],   # Connect to checkpoint clip output
+                }
+            }
+            # Rewire sampler and clip nodes to use LoRA output instead of checkpoint
+            if "3" in workflow:  # KSampler
+                workflow["3"]["inputs"]["model"] = ["10", 0]
+            if "6" in workflow:  # Positive CLIP
+                workflow["6"]["inputs"]["clip"] = ["10", 1]
+            if "7" in workflow:  # Negative CLIP
+                workflow["7"]["inputs"]["clip"] = ["10", 1]
+            print(f"🎭 Applied LoRA: {lora_file} (strength: {lora_strength})")
+
     # Submit and poll with progress tracking
     success, result = submit_workflow(workflow)
     if not success:
@@ -1277,476 +984,6 @@ def generate_image(prompt_text: str, model_name: str, width: int, height: int,
         return None, f"Generation failed: {progress.error_message or status}"
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# IMAGE EDITING (img2img, inpainting, upscaling)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Denoise strength presets for img2img
-IMG2IMG_STRENGTH_PRESETS = [
-    ("Subtle", 0.3, "Light changes, keep most of original"),
-    ("Moderate", 0.5, "Balanced transformation"),
-    ("Strong", 0.7, "Major changes, keep structure"),
-    ("Creative", 0.9, "Almost new image, guided by original"),
-]
-
-# Upscaler models commonly available in ComfyUI
-UPSCALER_MODELS = [
-    ("4x-UltraSharp", "Best for photos, sharp details"),
-    ("4x-AnimeSharp", "Best for anime/illustrations"),
-    ("ESRGAN_4x", "General purpose, good quality"),
-    ("RealESRGAN_x4plus", "Realistic images, reduces noise"),
-    ("RealESRGAN_x4plus_anime", "Anime-optimized"),
-]
-
-
-def generate_img2img(
-    prompt_text: str,
-    model_name: str,
-    input_image_path: str,
-    denoise_strength: float = 0.5,
-    steps: int = 30,
-    cfg: float = 7.0,
-    seed: int = -1,
-    progress_callback=None
-) -> tuple[Optional[str], str]:
-    """Generate an image using img2img (image-to-image transformation).
-
-    Args:
-        prompt_text: The generation prompt
-        model_name: Name of the model to use
-        input_image_path: Path to the source image
-        denoise_strength: How much to change (0=none, 1=complete redraw)
-        steps: Number of sampling steps
-        cfg: CFG scale
-        seed: Random seed (-1 for random)
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (output_path or None, status_message)
-    """
-    import random
-    from forge_progress import track_generation_progress
-
-    # Check backend
-    running, status = check_backend()
-    if not running:
-        return None, "ComfyUI not running. Start it first."
-
-    # Verify input image exists
-    input_path = Path(input_image_path)
-    if not input_path.exists():
-        return None, f"Input image not found: {input_image_path}"
-
-    # Find model file
-    model_file = None
-    for search_path in MODEL_SEARCH_PATHS:
-        for pattern in ["**/*.safetensors", "**/*.ckpt"]:
-            for fp in search_path.glob(pattern):
-                if model_name in fp.stem:
-                    model_file = fp.name
-                    break
-
-    if not model_file:
-        model_file = f"{model_name}.safetensors"
-
-    actual_seed = seed if seed >= 0 else random.randint(0, 2**32-1)
-
-    # Detect model family
-    is_lightning = "lightning" in model_name.lower()
-    is_turbo = "turbo" in model_name.lower()
-
-    # Build img2img workflow
-    workflow = build_img2img_workflow(
-        model_file=model_file,
-        input_image_path=str(input_path),
-        prompt=prompt_text,
-        denoise=denoise_strength,
-        steps=steps if not is_lightning else 4,
-        cfg=cfg if not is_lightning else 1.5,
-        seed=actual_seed,
-        is_lightning=is_lightning,
-        is_turbo=is_turbo,
-    )
-
-    # Submit and poll
-    success, result = submit_workflow(workflow)
-    if not success:
-        return None, f"Submit failed: {result}"
-
-    prompt_id = result
-
-    status, output_filename, progress = track_generation_progress(
-        COMFYUI_URL, prompt_id, timeout=180, on_progress=progress_callback
-    )
-
-    if status == "completed" and output_filename:
-        output_path = None
-        for check_path in [OUTPUT_DIR / output_filename, FORGE_DIR / "output" / output_filename]:
-            if check_path.exists():
-                output_path = str(check_path)
-                break
-
-        if output_path:
-            return output_path, f"Generated in {progress.format_time(progress.elapsed_seconds)} • Seed: {actual_seed}"
-        else:
-            return None, f"Output file not found: {output_filename}"
-    elif status == "timeout":
-        return None, "Generation timed out"
-    else:
-        return None, f"Generation failed: {progress.error_message or status}"
-
-
-def build_img2img_workflow(
-    model_file: str,
-    input_image_path: str,
-    prompt: str,
-    denoise: float,
-    steps: int,
-    cfg: float,
-    seed: int,
-    is_lightning: bool = False,
-    is_turbo: bool = False,
-) -> dict:
-    """Build a ComfyUI workflow for img2img generation."""
-
-    # Sampler settings based on model type
-    if is_lightning:
-        sampler = "euler"
-        scheduler = "sgm_uniform"
-    elif is_turbo:
-        sampler = "dpmpp_sde"
-        scheduler = "karras"
-    else:
-        sampler = "euler_ancestral"
-        scheduler = "normal"
-
-    return {
-        "1": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": model_file}
-        },
-        "2": {
-            "class_type": "LoadImage",
-            "inputs": {"image": input_image_path}
-        },
-        "3": {
-            "class_type": "VAEEncode",
-            "inputs": {
-                "pixels": ["2", 0],
-                "vae": ["1", 2]
-            }
-        },
-        "4": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": prompt,
-                "clip": ["1", 1]
-            }
-        },
-        "5": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": "",  # Negative prompt (empty)
-                "clip": ["1", 1]
-            }
-        },
-        "6": {
-            "class_type": "KSampler",
-            "inputs": {
-                "model": ["1", 0],
-                "positive": ["4", 0],
-                "negative": ["5", 0],
-                "latent_image": ["3", 0],
-                "seed": seed,
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": sampler,
-                "scheduler": scheduler,
-                "denoise": denoise,
-            }
-        },
-        "7": {
-            "class_type": "VAEDecode",
-            "inputs": {
-                "samples": ["6", 0],
-                "vae": ["1", 2]
-            }
-        },
-        "8": {
-            "class_type": "SaveImage",
-            "inputs": {
-                "images": ["7", 0],
-                "filename_prefix": "forge_img2img"
-            }
-        }
-    }
-
-
-def generate_inpaint(
-    prompt_text: str,
-    model_name: str,
-    input_image_path: str,
-    mask_image_path: str,
-    denoise_strength: float = 0.8,
-    steps: int = 30,
-    cfg: float = 7.0,
-    seed: int = -1,
-    progress_callback=None
-) -> tuple[Optional[str], str]:
-    """Generate an image using inpainting (edit masked regions).
-
-    Args:
-        prompt_text: What to generate in the masked area
-        model_name: Name of the model to use
-        input_image_path: Path to the source image
-        mask_image_path: Path to the mask (white = edit, black = keep)
-        denoise_strength: How much to change masked area
-        steps: Number of sampling steps
-        cfg: CFG scale
-        seed: Random seed (-1 for random)
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (output_path or None, status_message)
-    """
-    import random
-    from forge_progress import track_generation_progress
-
-    # Check backend
-    running, status = check_backend()
-    if not running:
-        return None, "ComfyUI not running. Start it first."
-
-    # Verify input files exist
-    input_path = Path(input_image_path)
-    mask_path = Path(mask_image_path)
-    if not input_path.exists():
-        return None, f"Input image not found: {input_image_path}"
-    if not mask_path.exists():
-        return None, f"Mask image not found: {mask_image_path}"
-
-    # Find model file
-    model_file = None
-    for search_path in MODEL_SEARCH_PATHS:
-        for pattern in ["**/*.safetensors", "**/*.ckpt"]:
-            for fp in search_path.glob(pattern):
-                if model_name in fp.stem:
-                    model_file = fp.name
-                    break
-
-    if not model_file:
-        model_file = f"{model_name}.safetensors"
-
-    actual_seed = seed if seed >= 0 else random.randint(0, 2**32-1)
-
-    # Build inpaint workflow
-    workflow = build_inpaint_workflow(
-        model_file=model_file,
-        input_image_path=str(input_path),
-        mask_image_path=str(mask_path),
-        prompt=prompt_text,
-        denoise=denoise_strength,
-        steps=steps,
-        cfg=cfg,
-        seed=actual_seed,
-    )
-
-    # Submit and poll
-    success, result = submit_workflow(workflow)
-    if not success:
-        return None, f"Submit failed: {result}"
-
-    prompt_id = result
-
-    status, output_filename, progress = track_generation_progress(
-        COMFYUI_URL, prompt_id, timeout=180, on_progress=progress_callback
-    )
-
-    if status == "completed" and output_filename:
-        output_path = None
-        for check_path in [OUTPUT_DIR / output_filename, FORGE_DIR / "output" / output_filename]:
-            if check_path.exists():
-                output_path = str(check_path)
-                break
-
-        if output_path:
-            return output_path, f"Generated in {progress.format_time(progress.elapsed_seconds)} • Seed: {actual_seed}"
-        else:
-            return None, f"Output file not found: {output_filename}"
-    elif status == "timeout":
-        return None, "Generation timed out"
-    else:
-        return None, f"Generation failed: {progress.error_message or status}"
-
-
-def build_inpaint_workflow(
-    model_file: str,
-    input_image_path: str,
-    mask_image_path: str,
-    prompt: str,
-    denoise: float,
-    steps: int,
-    cfg: float,
-    seed: int,
-) -> dict:
-    """Build a ComfyUI workflow for inpainting."""
-    return {
-        "1": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": model_file}
-        },
-        "2": {
-            "class_type": "LoadImage",
-            "inputs": {"image": input_image_path}
-        },
-        "3": {
-            "class_type": "LoadImage",
-            "inputs": {"image": mask_image_path}
-        },
-        "4": {
-            "class_type": "VAEEncodeForInpaint",
-            "inputs": {
-                "pixels": ["2", 0],
-                "vae": ["1", 2],
-                "mask": ["3", 0],
-                "grow_mask_by": 6,  # Feather mask edges
-            }
-        },
-        "5": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": prompt,
-                "clip": ["1", 1]
-            }
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": "",
-                "clip": ["1", 1]
-            }
-        },
-        "7": {
-            "class_type": "KSampler",
-            "inputs": {
-                "model": ["1", 0],
-                "positive": ["5", 0],
-                "negative": ["6", 0],
-                "latent_image": ["4", 0],
-                "seed": seed,
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": "euler_ancestral",
-                "scheduler": "normal",
-                "denoise": denoise,
-            }
-        },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": {
-                "samples": ["7", 0],
-                "vae": ["1", 2]
-            }
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": {
-                "images": ["8", 0],
-                "filename_prefix": "forge_inpaint"
-            }
-        }
-    }
-
-
-def upscale_image(
-    input_image_path: str,
-    upscaler_model: str = "4x-UltraSharp",
-    progress_callback=None
-) -> tuple[Optional[str], str]:
-    """Upscale an image using an upscaler model.
-
-    Args:
-        input_image_path: Path to the image to upscale
-        upscaler_model: Name of the upscaler model
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (output_path or None, status_message)
-    """
-    from forge_progress import track_generation_progress
-
-    # Check backend
-    running, status = check_backend()
-    if not running:
-        return None, "ComfyUI not running. Start it first."
-
-    # Verify input image exists
-    input_path = Path(input_image_path)
-    if not input_path.exists():
-        return None, f"Input image not found: {input_image_path}"
-
-    # Build upscale workflow
-    workflow = build_upscale_workflow(
-        input_image_path=str(input_path),
-        upscaler_model=upscaler_model,
-    )
-
-    # Submit and poll
-    success, result = submit_workflow(workflow)
-    if not success:
-        return None, f"Submit failed: {result}"
-
-    prompt_id = result
-
-    status, output_filename, progress = track_generation_progress(
-        COMFYUI_URL, prompt_id, timeout=300, on_progress=progress_callback
-    )
-
-    if status == "completed" and output_filename:
-        output_path = None
-        for check_path in [OUTPUT_DIR / output_filename, FORGE_DIR / "output" / output_filename]:
-            if check_path.exists():
-                output_path = str(check_path)
-                break
-
-        if output_path:
-            return output_path, f"Upscaled in {progress.format_time(progress.elapsed_seconds)}"
-        else:
-            return None, f"Output file not found: {output_filename}"
-    elif status == "timeout":
-        return None, "Upscaling timed out"
-    else:
-        return None, f"Upscaling failed: {progress.error_message or status}"
-
-
-def build_upscale_workflow(input_image_path: str, upscaler_model: str) -> dict:
-    """Build a ComfyUI workflow for image upscaling."""
-    return {
-        "1": {
-            "class_type": "LoadImage",
-            "inputs": {"image": input_image_path}
-        },
-        "2": {
-            "class_type": "UpscaleModelLoader",
-            "inputs": {"model_name": f"{upscaler_model}.pth"}
-        },
-        "3": {
-            "class_type": "ImageUpscaleWithModel",
-            "inputs": {
-                "upscale_model": ["2", 0],
-                "image": ["1", 0]
-            }
-        },
-        "4": {
-            "class_type": "SaveImage",
-            "inputs": {
-                "images": ["3", 0],
-                "filename_prefix": "forge_upscaled"
-            }
-        }
-    }
-
-
 def generate_video(prompt_text: str, model_name: str, width: int, height: int,
                    num_frames: int, steps: int, cfg: float, seed: int,
                    progress_callback=None) -> tuple[Optional[str], str]:
@@ -1780,11 +1017,51 @@ def generate_video(prompt_text: str, model_name: str, width: int, height: int,
     
     model_lower = model_name.lower()
     if "wan" in model_lower:
+        # Check for text encoder - Mac needs FP16, others can use FP8
+        fp16_encoder = FORGE_DIR / "models" / "text_encoders" / "umt5_xxl_fp16.safetensors"
+        fp8_encoder = FORGE_DIR / "models" / "text_encoders" / "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+
         if is_mac:
-            return None, "Wan models not yet supported on Mac (fp8 text encoder incompatible with MPS). Use LTX-Video instead."
+            if not fp16_encoder.exists():
+                return None, "Wan models on Mac require FP16 text encoder (MPS doesn't support FP8). Missing: umt5_xxl_fp16.safetensors"
+            wan_encoder = "umt5_xxl_fp16.safetensors"
+        else:
+            # Prefer FP8 on non-Mac (smaller), fall back to FP16
+            if fp8_encoder.exists():
+                wan_encoder = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+            elif fp16_encoder.exists():
+                wan_encoder = "umt5_xxl_fp16.safetensors"
+            else:
+                return None, "Wan models require UMT5 text encoder. Missing: umt5_xxl_fp16.safetensors or umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+
         workflow_name = "wan21_t2v_api.json"
         model_family = "wan"
+    elif "ltx-2" in model_lower or "ltx2" in model_lower:
+        # LTX-2 (19B) requires Gemma text encoder - different workflow
+        # Check if required text encoders exist
+        gemma_paths = [
+            FORGE_DIR / "models" / "text_encoders" / "gemma_3_12B_it_fp8_e4m3fn.safetensors",
+            FORGE_DIR / "models" / "clip" / "gemma_3_12B_it_fp8_e4m3fn.safetensors",
+        ]
+        proj_paths = [
+            FORGE_DIR / "models" / "text_encoders" / "ltx-2-19b-dev-fp4_projections_only.safetensors",
+            FORGE_DIR / "models" / "clip" / "ltx-2-19b-dev-fp4_projections_only.safetensors",
+        ]
+        has_gemma = any(p.exists() for p in gemma_paths)
+        has_proj = any(p.exists() for p in proj_paths)
+
+        if not has_gemma or not has_proj:
+            missing = []
+            if not has_gemma:
+                missing.append("Gemma FP8 encoder (gemma_3_12B_it_fp8_e4m3fn.safetensors)")
+            if not has_proj:
+                missing.append("LTX-2 projections (ltx-2-19b-dev-fp4_projections_only.safetensors)")
+            return None, f"LTX-2 requires additional text encoders. Missing: {', '.join(missing)}. Download from: https://huggingface.co/GitMylo/LTX-2-comfy_gemma_fp8_e4m3fn"
+
+        workflow_name = "ltx2_t2v_api.json"
+        model_family = "ltx2"
     elif "ltx" in model_lower:
+        # Original LTX-Video uses T5 encoder
         workflow_name = "ltxv_t2v_api.json"
         model_family = "ltx"
     else:
@@ -1818,9 +1095,12 @@ def generate_video(prompt_text: str, model_name: str, width: int, height: int,
         for node_id, node in workflow.items():
             cls = node.get("class_type", "")
             inputs = node.get("inputs", {})
-            
+
             if cls == "UNETLoader":
                 inputs["unet_name"] = model_file
+            elif cls == "CLIPLoader":
+                # Inject the selected encoder (FP16 on Mac, FP8 on others)
+                inputs["clip_name"] = wan_encoder
             elif cls == "EmptyHunyuanLatentVideo":
                 inputs["width"] = int(width)
                 inputs["height"] = int(height)
@@ -1834,12 +1114,34 @@ def generate_video(prompt_text: str, model_name: str, width: int, height: int,
                     inputs["text"] = prompt_text
                 elif node_id == "7":  # Negative prompt
                     inputs["text"] = negative_prompt
-    else:
-        # LTX workflow parameterization
+    elif model_family == "ltx2":
+        # LTX-2 (19B) workflow parameterization - uses Gemma encoder
         for node_id, node in workflow.items():
             cls = node.get("class_type", "")
             inputs = node.get("inputs", {})
-            
+
+            if cls == "CheckpointLoaderSimple":
+                inputs["ckpt_name"] = model_file
+            elif cls == "EmptyLTXVLatentVideo":
+                inputs["width"] = int(width)
+                inputs["height"] = int(height)
+                inputs["length"] = int(num_frames)
+            elif cls == "LTXVScheduler":
+                inputs["steps"] = int(steps)
+            elif cls == "SamplerCustom":
+                inputs["cfg"] = float(cfg)
+                inputs["noise_seed"] = actual_seed
+            elif cls == "CLIPTextEncode":
+                if node_id == "102":  # Positive prompt (LTX-2 workflow uses different IDs)
+                    inputs["text"] = prompt_text
+                elif node_id == "103":  # Negative prompt
+                    inputs["text"] = negative_prompt
+    else:
+        # Original LTX-Video workflow parameterization - uses T5 encoder
+        for node_id, node in workflow.items():
+            cls = node.get("class_type", "")
+            inputs = node.get("inputs", {})
+
             if cls == "CheckpointLoaderSimple":
                 inputs["ckpt_name"] = model_file
             elif cls == "EmptyLTXVLatentVideo":
@@ -1901,966 +1203,65 @@ def generate_video(prompt_text: str, model_name: str, width: int, height: int,
         return None, f"Generation failed: {progress.error_message or status}"
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# VOICE/SPEECH GENERATION (Chatterbox TTS)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Voice model state - lazy loaded
-_voice_models = {"turbo": None, "standard": None, "loading": False, "error": None}
-_voice_lock = None
-
-def _get_voice_lock():
-    """Get or create the voice model lock (thread-safe initialization)."""
-    global _voice_lock
-    if _voice_lock is None:
-        import threading
-        _voice_lock = threading.Lock()
-    return _voice_lock
-
-def get_voice_model_status() -> tuple[bool, str]:
-    """Check if voice models are loaded.
-
-    Returns: (ready, message)
-    """
-    if _voice_models["error"]:
-        return False, f"Error: {_voice_models['error']}"
-    if _voice_models["loading"]:
-        return False, "Loading voice models..."
-    if _voice_models["turbo"] is not None:
-        return True, "Voice models ready"
-    return False, "Voice models not loaded"
-
-def load_voice_models(progress_callback=None) -> tuple[bool, str]:
-    """Load Chatterbox TTS models.
-
+def generate_video_from_image(prompt_text: str, image_path: str, model_name: str, 
+                               width: int, height: int, num_frames: int, 
+                               steps: int, cfg: float, seed: int,
+                               strength: float = 0.9,
+                               progress_callback=None) -> tuple[Optional[str], str]:
+    """Generate a video from an input image using LTX-Video.
+    
     Args:
-        progress_callback: Optional callback(percent, message) for progress updates
-
-    Returns: (success, message)
-    """
-    lock = _get_voice_lock()
-    with lock:
-        # Already loaded?
-        if _voice_models["turbo"] is not None:
-            return True, "Already loaded"
-
-        # Already loading?
-        if _voice_models["loading"]:
-            return False, "Already loading"
-
-        _voice_models["loading"] = True
-        _voice_models["error"] = None
-
-    try:
-        import torch
-        device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
-
-        if progress_callback:
-            progress_callback(10, "Loading fast voice model...")
-
-        from chatterbox.tts_turbo import ChatterboxTurboTTS
-        turbo = ChatterboxTurboTTS.from_pretrained(device)
-
-        if progress_callback:
-            progress_callback(55, "Loading quality voice model...")
-
-        from chatterbox.tts import ChatterboxTTS
-        standard = ChatterboxTTS.from_pretrained(device)
-
-        with lock:
-            _voice_models["turbo"] = turbo
-            _voice_models["standard"] = standard
-            _voice_models["loading"] = False
-
-        if progress_callback:
-            progress_callback(100, "Voice models ready!")
-
-        return True, "Voice models loaded"
-
-    except ImportError as e:
-        error_msg = "Chatterbox TTS not installed. Run: pip install chatterbox-tts"
-        with lock:
-            _voice_models["loading"] = False
-            _voice_models["error"] = error_msg
-        return False, error_msg
-
-    except Exception as e:
-        error_msg = str(e)
-        with lock:
-            _voice_models["loading"] = False
-            _voice_models["error"] = error_msg
-        return False, f"Failed to load voice models: {error_msg}"
-
-def unload_voice_models():
-    """Unload voice models to free memory."""
-    lock = _get_voice_lock()
-    with lock:
-        _voice_models["turbo"] = None
-        _voice_models["standard"] = None
-        _voice_models["loading"] = False
-        _voice_models["error"] = None
-
-    # Force garbage collection
-    import gc
-    gc.collect()
-
-    try:
-        import torch
-        if torch.backends.mps.is_available():
-            torch.mps.empty_cache()
-        elif torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except:
-        pass
-
-def process_voice_audio(audio, sr: int, speed: float = 1.0, semitones: int = 0):
-    """Apply speed and pitch changes to audio using SoundTouch.
-
-    Args:
-        audio: numpy array of audio samples
-        sr: sample rate
-        speed: playback speed (0.5 to 1.5)
-        semitones: pitch shift (-6 to +6)
-
-    Returns:
-        Processed audio as numpy array
-    """
-    if speed == 1.0 and semitones == 0:
-        return audio
-
-    import tempfile
-    import soundfile as sf
-
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f_in:
-        sf.write(f_in.name, audio, sr)
-        in_path = f_in.name
-
-    out_path = in_path.replace('.wav', '_out.wav')
-
-    # Build soundstretch command
-    cmd = ['soundstretch', in_path, out_path]
-    if speed != 1.0:
-        tempo_pct = (speed - 1.0) * 100
-        cmd.append(f'-tempo={tempo_pct:+.1f}')
-    if semitones != 0:
-        cmd.append(f'-pitch={semitones:+.1f}')
-
-    try:
-        result = subprocess.run(cmd, check=True, capture_output=True)
-        processed, _ = sf.read(out_path)
-        return processed
-    except FileNotFoundError:
-        # soundstretch not installed
-        print("Warning: soundstretch not found. Install with: brew install sound-touch")
-        return audio
-    except Exception as e:
-        print(f"SoundTouch error: {e}")
-        return audio
-    finally:
-        Path(in_path).unlink(missing_ok=True)
-        Path(out_path).unlink(missing_ok=True)
-
-def generate_speech(
-    text: str,
-    mode: str = "quick",
-    voice_file: Optional[str] = None,
-    emotion: float = 0.5,
-    speed: float = 1.0,
-    pitch: int = 0,
-    progress_callback=None
-) -> tuple[Optional[str], str]:
-    """Generate speech from text using Chatterbox TTS.
-
-    Args:
-        text: Text to convert to speech (can include tags like [laugh], [sigh])
-        mode: "quick" (fast with expression tags) or "quality" (better audio, emotion control)
-        voice_file: Optional path to voice sample for cloning (5-10 sec of speech)
-        emotion: Emotion/exaggeration level 0-1 (quality mode only)
-        speed: Playback speed 0.5-1.5
-        pitch: Pitch shift in semitones -6 to +6
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (output_path or None, status_message)
-    """
-    import soundfile as sf
-
-    # Check if models are loaded
-    ready, status = get_voice_model_status()
-    if not ready:
-        # Try to load them
-        if progress_callback:
-            progress_callback(0, "Loading voice models...")
-        success, msg = load_voice_models(progress_callback)
-        if not success:
-            return None, msg
-
-    if not text.strip():
-        return None, "Please enter some text"
-
-    start_time = time.time()
-
-    try:
-        if progress_callback:
-            progress_callback(70, "Generating speech...")
-
-        if mode == "quick":
-            model = _voice_models["turbo"]
-            wav = model.generate(
-                text,
-                audio_prompt_path=voice_file,
-                temperature=0.8,
-                top_p=0.95,
-                repetition_penalty=1.1
-            )
-            sr = model.sr
-        else:  # quality mode
-            model = _voice_models["standard"]
-            wav = model.generate(
-                text,
-                audio_prompt_path=voice_file,
-                exaggeration=emotion,
-                cfg_weight=0.5,
-                temperature=1.0
-            )
-            sr = model.sr
-
-        # Convert to numpy
-        audio = wav.squeeze(0).numpy()
-
-        if progress_callback:
-            progress_callback(85, "Processing audio...")
-
-        # Apply speed/pitch if needed
-        audio = process_voice_audio(audio, sr, speed, pitch)
-
-        # Save output
-        timestamp = int(time.time())
-        output_filename = f"voice_{timestamp}.wav"
-        output_path = OUTPUT_DIR / output_filename
-        sf.write(str(output_path), audio, sr)
-
-        elapsed = time.time() - start_time
-
-        if progress_callback:
-            progress_callback(100, "Done!")
-
-        return str(output_path), f"Generated in {elapsed:.1f}s"
-
-    except Exception as e:
-        return None, f"Generation failed: {str(e)}"
-
-# Expression tags supported by Chatterbox Turbo
-VOICE_EXPRESSION_TAGS = [
-    ("[laugh]", "Laughter"),
-    ("[chuckle]", "Soft laugh"),
-    ("[sigh]", "Sigh"),
-    ("[gasp]", "Gasp"),
-    ("[cough]", "Cough"),
-    ("[sniff]", "Sniff"),
-    ("[groan]", "Groan"),
-]
-
-# Voice presets directory
-VOICES_DIR = FORGE_DIR / "voices"
-
-def get_voice_presets() -> List[str]:
-    """Get list of available voice preset names."""
-    presets = []
-    if VOICES_DIR.exists():
-        for f in sorted(VOICES_DIR.glob("*.wav")) + sorted(VOICES_DIR.glob("*.mp3")):
-            presets.append(f.stem)
-    return presets
-
-def resolve_voice_preset(preset_name: str) -> Optional[str]:
-    """Resolve a voice preset name to its file path."""
-    if not preset_name:
-        return None
-    for ext in [".wav", ".mp3"]:
-        path = VOICES_DIR / f"{preset_name}{ext}"
-        if path.exists():
-            return str(path)
-    return None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMFYUI TTS GENERATION (BYOM - Bring Your Own Model)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def generate_speech_comfyui(
-    model: 'Model',
-    text: str,
-    voice_file: Optional[str] = None,
-    speed: float = 1.0,
-    pitch: int = 0,
-    progress_callback=None
-) -> tuple[Optional[str], str]:
-    """Generate speech using a TTS model through ComfyUI.
-
-    This function routes TTS generation through ComfyUI, allowing users to
-    bring their own TTS models (XTTS, F5-TTS, Bark, TorToise, StyleTTS2, etc.)
-
-    Args:
-        model: The Model object for the TTS model to use
-        text: Text to convert to speech
-        voice_file: Optional path to voice sample for cloning
-        speed: Playback speed 0.5-1.5
-        pitch: Pitch shift in semitones -6 to +6
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (output_path or None, status_message)
-    """
-    if progress_callback:
-        progress_callback(10, f"Loading {model.name}...")
-
-    # Check if ComfyUI backend is available
-    backend_ok, backend_status = check_backend()
-    if not backend_ok:
-        return None, f"ComfyUI not running. Start it first to use {model.name}."
-
-    if progress_callback:
-        progress_callback(20, "Preparing workflow...")
-
-    # Build ComfyUI workflow for TTS
-    # The workflow structure depends on which ComfyUI TTS nodes are installed
-    # Common ones: ComfyUI-XTTS, ComfyUI-F5TTS, etc.
-    workflow = build_tts_workflow(model, text, voice_file)
-
-    if workflow is None:
-        return None, f"No ComfyUI workflow available for {model.family}. Install the appropriate nodes."
-
-    try:
-        if progress_callback:
-            progress_callback(40, "Generating speech...")
-
-        # Queue the workflow
-        import requests
-        response = requests.post(
-            f"{COMFYUI_URL}/prompt",
-            json={"prompt": workflow},
-            timeout=120
-        )
-        response.raise_for_status()
-        result = response.json()
-        prompt_id = result.get("prompt_id")
-
-        if not prompt_id:
-            return None, "Failed to queue TTS workflow"
-
-        # Poll for completion
-        if progress_callback:
-            progress_callback(60, "Processing...")
-
-        # Wait for output (similar to image generation)
-        output_path = poll_comfyui_output(prompt_id, "audio", progress_callback)
-
-        if output_path:
-            # Apply speed/pitch post-processing if needed
-            if speed != 1.0 or pitch != 0:
-                if progress_callback:
-                    progress_callback(90, "Applying audio effects...")
-                import soundfile as sf
-                audio, sr = sf.read(output_path)
-                audio = process_voice_audio(audio, sr, speed, pitch)
-                sf.write(output_path, audio, sr)
-
-            if progress_callback:
-                progress_callback(100, "Done!")
-            return output_path, f"Generated with {model.name}"
-        else:
-            return None, "Generation timed out or failed"
-
-    except Exception as e:
-        return None, f"ComfyUI TTS error: {str(e)}"
-
-
-def build_tts_workflow(model: 'Model', text: str, voice_file: Optional[str] = None) -> Optional[dict]:
-    """Build a ComfyUI workflow for TTS generation.
-
-    This creates the appropriate workflow based on which TTS model family
-    is being used and which ComfyUI nodes are available.
-    """
-    # Check which TTS nodes are available in ComfyUI
-    # This is model-family specific
-
-    if model.family == "xtts":
-        return build_xtts_workflow(model, text, voice_file)
-    elif model.family == "f5tts":
-        return build_f5tts_workflow(model, text, voice_file)
-    elif model.family == "bark":
-        return build_bark_workflow(model, text, voice_file)
-    elif model.family == "tortoise":
-        return build_tortoise_workflow(model, text, voice_file)
-    elif model.family == "styletts":
-        return build_styletts_workflow(model, text, voice_file)
-    else:
-        # Unknown model family - try generic workflow
-        return None
-
-
-def build_xtts_workflow(model: 'Model', text: str, voice_file: Optional[str] = None) -> dict:
-    """Build ComfyUI workflow for XTTS/Coqui TTS."""
-    # Standard XTTS node workflow
-    # Requires: ComfyUI-XTTS or similar node pack
-    return {
-        "1": {
-            "class_type": "XTTSLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "XTTSGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "text": text,
-                "speaker_wav": voice_file or "",
-                "language": "en",
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "voice_xtts"
-            }
-        }
-    }
-
-
-def build_f5tts_workflow(model: 'Model', text: str, voice_file: Optional[str] = None) -> dict:
-    """Build ComfyUI workflow for F5-TTS."""
-    return {
-        "1": {
-            "class_type": "F5TTSLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "F5TTSGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "text": text,
-                "ref_audio": voice_file or "",
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "voice_f5"
-            }
-        }
-    }
-
-
-def build_bark_workflow(model: 'Model', text: str, voice_file: Optional[str] = None) -> dict:
-    """Build ComfyUI workflow for Bark TTS."""
-    return {
-        "1": {
-            "class_type": "BarkLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "BarkGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "text": text,
-                "voice_preset": voice_file or "v2/en_speaker_6",
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "voice_bark"
-            }
-        }
-    }
-
-
-def build_tortoise_workflow(model: 'Model', text: str, voice_file: Optional[str] = None) -> dict:
-    """Build ComfyUI workflow for TorToise TTS."""
-    return {
-        "1": {
-            "class_type": "TortoiseLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "TortoiseGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "text": text,
-                "voice_dir": voice_file or "",
-                "preset": "fast",  # fast, standard, high_quality
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "voice_tortoise"
-            }
-        }
-    }
-
-
-def build_styletts_workflow(model: 'Model', text: str, voice_file: Optional[str] = None) -> dict:
-    """Build ComfyUI workflow for StyleTTS2."""
-    return {
-        "1": {
-            "class_type": "StyleTTS2Loader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "StyleTTS2Generate",
-            "inputs": {
-                "model": ["1", 0],
-                "text": text,
-                "reference_audio": voice_file or "",
-                "diffusion_steps": 5,
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "voice_styletts"
-            }
-        }
-    }
-
-
-def poll_comfyui_output(prompt_id: str, output_type: str = "image", progress_callback=None, timeout: int = 300) -> Optional[str]:
-    """Poll ComfyUI for workflow completion and return output path.
-
-    Args:
-        prompt_id: The prompt ID from queueing the workflow
-        output_type: "image" or "audio" to look for correct output
-        progress_callback: Optional progress callback
-        timeout: Maximum seconds to wait
-
-    Returns:
-        Path to output file or None if failed/timeout
-    """
-    import requests
-    import time as time_module
-
-    start = time_module.time()
-    while time_module.time() - start < timeout:
-        try:
-            # Check history for this prompt
-            response = requests.get(f"{COMFYUI_URL}/history/{prompt_id}", timeout=10)
-            if response.status_code == 200:
-                history = response.json()
-                if prompt_id in history:
-                    outputs = history[prompt_id].get("outputs", {})
-                    for node_id, node_output in outputs.items():
-                        # Look for audio or image outputs
-                        if output_type == "audio" and "audio" in node_output:
-                            audio_info = node_output["audio"][0]
-                            filename = audio_info.get("filename")
-                            subfolder = audio_info.get("subfolder", "")
-                            # Build full path
-                            output_path = OUTPUT_DIR / filename
-                            if output_path.exists():
-                                return str(output_path)
-                            # Try ComfyUI output folder
-                            comfy_output = Path.home() / "ComfyUI" / "output" / subfolder / filename
-                            if comfy_output.exists():
-                                return str(comfy_output)
-                        elif output_type == "image" and "images" in node_output:
-                            # Handle image output (existing logic)
-                            pass
-
-            time_module.sleep(1)
-            if progress_callback:
-                elapsed = time_module.time() - start
-                pct = min(90, 60 + (elapsed / timeout) * 30)
-                progress_callback(int(pct), "Waiting for output...")
-
-        except Exception:
-            time_module.sleep(1)
-
-    return None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MUSIC GENERATION (ComfyUI Backend)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Music generation presets
-MUSIC_DURATION_PRESETS = [
-    ("Short", 5, "~5 seconds - Jingles, stingers"),
-    ("Medium", 15, "~15 seconds - Loops, transitions"),
-    ("Standard", 30, "~30 seconds - Background music"),
-    ("Long", 60, "~60 seconds - Full pieces"),
-]
-
-MUSIC_STYLE_TAGS = [
-    ("ambient", "Atmospheric, floating"),
-    ("electronic", "Synths, beats"),
-    ("acoustic", "Natural instruments"),
-    ("orchestral", "Cinematic, epic"),
-    ("lofi", "Chill, relaxed"),
-    ("rock", "Guitars, drums"),
-    ("jazz", "Smooth, improvised"),
-    ("classical", "Traditional, composed"),
-]
-
-
-def generate_music(
-    model: 'Model',
-    prompt: str,
-    duration: int = 30,
-    melody_audio: Optional[str] = None,
-    progress_callback=None
-) -> tuple[Optional[str], str]:
-    """Generate music using a music model through ComfyUI.
-
-    Args:
-        model: The Model object for the music model to use
-        prompt: Text description of the music to generate
-        duration: Target duration in seconds
-        melody_audio: Optional path to audio file for melody conditioning
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (output_path or None, status_message)
-    """
-    if progress_callback:
-        progress_callback(10, f"Loading {model.name}...")
-
-    # Check if ComfyUI backend is available
-    backend_ok, backend_status = check_backend()
-    if not backend_ok:
-        return None, f"ComfyUI not running. Start it first to use {model.name}."
-
-    if progress_callback:
-        progress_callback(20, "Preparing workflow...")
-
-    # Build ComfyUI workflow for music
-    workflow = build_music_workflow(model, prompt, duration, melody_audio)
-
-    if workflow is None:
-        return None, f"No ComfyUI workflow available for {model.family}. Install the appropriate nodes."
-
-    try:
-        if progress_callback:
-            progress_callback(30, "Generating music...")
-
-        # Queue the workflow
-        import requests
-        response = requests.post(
-            f"{COMFYUI_URL}/prompt",
-            json={"prompt": workflow},
-            timeout=300  # Music can take a while
-        )
-        response.raise_for_status()
-        result = response.json()
-        prompt_id = result.get("prompt_id")
-
-        if not prompt_id:
-            return None, "Failed to queue music workflow"
-
-        # Poll for completion (longer timeout for music)
-        if progress_callback:
-            progress_callback(50, "Processing audio...")
-
-        output_path = poll_comfyui_output(prompt_id, "audio", progress_callback, timeout=600)
-
-        if output_path:
-            if progress_callback:
-                progress_callback(100, "Done!")
-            return output_path, f"Generated {duration}s with {model.name}"
-        else:
-            return None, "Generation timed out or failed"
-
-    except Exception as e:
-        return None, f"Music generation error: {str(e)}"
-
-
-def build_music_workflow(model: 'Model', prompt: str, duration: int, melody_audio: Optional[str] = None) -> Optional[dict]:
-    """Build a ComfyUI workflow for music generation.
-
-    Dispatches to model-family-specific workflow builders.
-    """
-    if model.family in ("musicgen", "musicgen_large"):
-        return build_musicgen_workflow(model, prompt, duration, melody_audio)
-    elif model.family == "stable_audio":
-        return build_stable_audio_workflow(model, prompt, duration)
-    elif model.family == "audiocraft":
-        return build_audiocraft_workflow(model, prompt, duration, melody_audio)
-    elif model.family == "riffusion":
-        return build_riffusion_workflow(model, prompt, duration)
-    elif model.family in ("audioldm", "audioldm2"):
-        return build_audioldm_workflow(model, prompt, duration)
-    else:
-        return None
-
-
-def build_musicgen_workflow(model: 'Model', prompt: str, duration: int, melody_audio: Optional[str] = None) -> dict:
-    """Build ComfyUI workflow for MusicGen."""
-    # MusicGen workflow - requires ComfyUI-MusicGen or similar
-    workflow = {
-        "1": {
-            "class_type": "MusicGenLoader",
-            "inputs": {
-                "model_name": str(model.path.name) if model.path.exists() else "facebook/musicgen-small",
-            }
-        },
-        "2": {
-            "class_type": "MusicGenGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "prompt": prompt,
-                "duration": duration,
-                "top_k": 250,
-                "top_p": 0.0,
-                "temperature": 1.0,
-                "cfg_coef": 3.0,
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "music_musicgen"
-            }
-        }
-    }
-
-    # Add melody conditioning if provided
-    if melody_audio:
-        workflow["4"] = {
-            "class_type": "LoadAudio",
-            "inputs": {"audio": melody_audio}
-        }
-        workflow["2"]["inputs"]["melody"] = ["4", 0]
-
-    return workflow
-
-
-def build_stable_audio_workflow(model: 'Model', prompt: str, duration: int) -> dict:
-    """Build ComfyUI workflow for Stable Audio."""
-    return {
-        "1": {
-            "class_type": "StableAudioLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "StableAudioGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "prompt": prompt,
-                "negative_prompt": "low quality, noise, distortion",
-                "seconds_start": 0,
-                "seconds_total": duration,
-                "cfg_scale": 7.0,
-                "steps": 100,
-                "seed": -1,  # Random
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "music_stable"
-            }
-        }
-    }
-
-
-def build_audiocraft_workflow(model: 'Model', prompt: str, duration: int, melody_audio: Optional[str] = None) -> dict:
-    """Build ComfyUI workflow for AudioCraft."""
-    workflow = {
-        "1": {
-            "class_type": "AudioCraftLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "AudioCraftGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "prompt": prompt,
-                "duration": duration,
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "music_audiocraft"
-            }
-        }
-    }
-
-    if melody_audio:
-        workflow["4"] = {
-            "class_type": "LoadAudio",
-            "inputs": {"audio": melody_audio}
-        }
-        workflow["2"]["inputs"]["melody_conditioning"] = ["4", 0]
-
-    return workflow
-
-
-def build_riffusion_workflow(model: 'Model', prompt: str, duration: int) -> dict:
-    """Build ComfyUI workflow for Riffusion."""
-    # Riffusion generates spectrograms that are converted to audio
-    return {
-        "1": {
-            "class_type": "RiffusionLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "RiffusionGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "prompt": prompt,
-                "negative_prompt": "",
-                "num_inference_steps": 50,
-                "guidance_scale": 7.0,
-                "duration": duration,
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "music_riffusion"
-            }
-        }
-    }
-
-
-def build_audioldm_workflow(model: 'Model', prompt: str, duration: int) -> dict:
-    """Build ComfyUI workflow for AudioLDM/AudioLDM2."""
-    return {
-        "1": {
-            "class_type": "AudioLDMLoader",
-            "inputs": {
-                "model_path": str(model.path),
-            }
-        },
-        "2": {
-            "class_type": "AudioLDMGenerate",
-            "inputs": {
-                "model": ["1", 0],
-                "prompt": prompt,
-                "negative_prompt": "low quality",
-                "duration": duration,
-                "guidance_scale": 2.5,
-                "num_inference_steps": 200,
-                "audio_length_in_s": float(duration),
-            }
-        },
-        "3": {
-            "class_type": "SaveAudio",
-            "inputs": {
-                "audio": ["2", 0],
-                "filename_prefix": "music_audioldm"
-            }
-        }
-    }
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# CONTROLNET SUPPORT
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ControlNet preprocessor types
-CONTROLNET_PREPROCESSORS = [
-    ("none", "None", "Use image directly as control"),
-    ("canny", "Canny Edge", "Extract edges from image"),
-    ("depth", "Depth Map", "Extract depth information"),
-    ("openpose", "OpenPose", "Detect human poses"),
-    ("lineart", "Line Art", "Convert to line art style"),
-    ("scribble", "Scribble", "Simple sketch to guide generation"),
-]
-
-# ControlNet models (common ones for SDXL)
-CONTROLNET_MODELS = [
-    ("controlnet-canny-sdxl-1.0", "Canny Edge", "Guide with edge detection"),
-    ("controlnet-depth-sdxl-1.0", "Depth", "Guide with depth maps"),
-    ("control-lora-canny-rank256", "Canny LoRA", "Lightweight canny control"),
-    ("control-lora-depth-rank256", "Depth LoRA", "Lightweight depth control"),
-]
-
-
-def discover_controlnet_models() -> List[str]:
-    """Discover available ControlNet models in ComfyUI."""
-    controlnet_models = []
-    for search_path in MODEL_SEARCH_PATHS:
-        controlnet_dir = search_path / "controlnet"
-        if controlnet_dir.exists():
-            for pattern in ["*.safetensors", "*.pth", "*.bin"]:
-                for fp in controlnet_dir.glob(pattern):
-                    controlnet_models.append(fp.stem)
-    return controlnet_models
-
-
-def generate_with_controlnet(
-    prompt_text: str,
-    model_name: str,
-    control_image_path: str,
-    controlnet_model: str,
-    preprocessor: str = "none",
-    control_strength: float = 1.0,
-    width: int = 1024,
-    height: int = 1024,
-    steps: int = 30,
-    cfg: float = 7.0,
-    seed: int = -1,
-    progress_callback=None
-) -> tuple[Optional[str], str]:
-    """Generate an image using ControlNet guidance.
-
-    Args:
-        prompt_text: The generation prompt
-        model_name: Name of the base model to use
-        control_image_path: Path to the control/reference image
-        controlnet_model: Name of the ControlNet model
-        preprocessor: Type of preprocessor to apply (canny, depth, etc.)
-        control_strength: How strongly the control image guides generation (0-1)
-        width: Output image width
-        height: Output image height
+        prompt_text: Motion/action prompt (describe what should happen)
+        image_path: Path to the input image
+        model_name: Name of the video model to use
+        width: Video width (multiple of 32)
+        height: Video height (multiple of 32)
+        num_frames: Number of frames
         steps: Number of sampling steps
         cfg: CFG scale
         seed: Random seed (-1 for random)
+        strength: How much the first frame can deviate (0-1, lower = more faithful)
         progress_callback: Optional callback for progress updates
-
+    
     Returns:
         Tuple of (output_path or None, status_message)
     """
     import random
+    import shutil
     from forge_progress import track_generation_progress
-
+    
     # Check backend
     running, status = check_backend()
     if not running:
         return None, "ComfyUI not running. Start it first."
-
-    # Verify control image exists
-    control_path = Path(control_image_path)
-    if not control_path.exists():
-        return None, f"Control image not found: {control_image_path}"
-
-    # Find model files
+    
+    # Validate image exists
+    if not Path(image_path).exists():
+        return None, f"Image not found: {image_path}"
+    
+    # Only LTX supports I2V on Mac currently
+    model_lower = model_name.lower()
+    if "ltx" not in model_lower:
+        return None, "Image-to-video currently only supported with LTX-Video models"
+    
+    workflow_path = WORKFLOWS_DIR / "ltxv_i2v_api.json"
+    if not workflow_path.exists():
+        return None, f"I2V workflow not found: {workflow_path}"
+    
+    with open(workflow_path) as f:
+        workflow = json.load(f)
+    
+    # Copy image to ComfyUI input folder
+    comfyui_input = Path(image_path).parent.parent / "input"
+    if not comfyui_input.exists():
+        comfyui_input = COMFYUI_PATH / "input"
+    comfyui_input.mkdir(exist_ok=True)
+    
+    input_image_name = f"forge_i2v_{random.randint(0, 99999)}.png"
+    dest_path = comfyui_input / input_image_name
+    shutil.copy(image_path, dest_path)
+    
+    # Find model file
     model_file = None
     for search_path in MODEL_SEARCH_PATHS:
         for pattern in ["**/*.safetensors", "**/*.ckpt"]:
@@ -2868,205 +1269,78 @@ def generate_with_controlnet(
                 if model_name in fp.stem:
                     model_file = fp.name
                     break
-
+    
     if not model_file:
         model_file = f"{model_name}.safetensors"
-
-    # Find ControlNet model file
-    cn_model_file = None
-    for search_path in MODEL_SEARCH_PATHS:
-        controlnet_dir = search_path / "controlnet"
-        if controlnet_dir.exists():
-            for pattern in ["*.safetensors", "*.pth"]:
-                for fp in controlnet_dir.glob(pattern):
-                    if controlnet_model in fp.stem:
-                        cn_model_file = fp.name
-                        break
-
-    if not cn_model_file:
-        cn_model_file = f"{controlnet_model}.safetensors"
-
+    
+    # Parameterize workflow
     actual_seed = seed if seed >= 0 else random.randint(0, 2**32-1)
-
-    # Build ControlNet workflow
-    workflow = build_controlnet_workflow(
-        model_file=model_file,
-        controlnet_model=cn_model_file,
-        control_image_path=str(control_path),
-        preprocessor=preprocessor,
-        prompt=prompt_text,
-        control_strength=control_strength,
-        width=width,
-        height=height,
-        steps=steps,
-        cfg=cfg,
-        seed=actual_seed,
-    )
-
-    # Submit and poll
+    negative_prompt = "low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts, fused fingers, bad anatomy, weird hand, ugly"
+    
+    for node_id, node in workflow.items():
+        cls = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+        
+        if cls == "LoadImage":
+            inputs["image"] = input_image_name
+        elif cls == "CheckpointLoaderSimple":
+            inputs["ckpt_name"] = model_file
+        elif cls == "EmptyLTXVLatentVideo":
+            inputs["width"] = int(width)
+            inputs["height"] = int(height)
+            inputs["length"] = int(num_frames)
+        elif cls == "LTXVImgToVideoInplace":
+            inputs["strength"] = float(strength)
+        elif cls == "LTXVScheduler":
+            inputs["steps"] = int(steps)
+        elif cls == "SamplerCustom":
+            inputs["noise_seed"] = actual_seed
+            inputs["cfg"] = float(cfg)
+        elif cls == "CLIPTextEncode":
+            if node_id == "6":  # Positive prompt
+                inputs["text"] = prompt_text
+            elif node_id == "7":  # Negative prompt
+                inputs["text"] = negative_prompt
+    
+    # Submit and poll with progress tracking
     success, result = submit_workflow(workflow)
     if not success:
         return None, f"Submit failed: {result}"
-
+    
     prompt_id = result
-
+    
+    # Use progress tracker
     status, output_filename, progress = track_generation_progress(
-        COMFYUI_URL, prompt_id, timeout=300, on_progress=progress_callback
+        COMFYUI_URL, prompt_id, timeout=600, on_progress=progress_callback
     )
-
+    
     if status == "completed" and output_filename:
+        # Find full path to output file
         output_path = None
-        for check_path in [OUTPUT_DIR / output_filename, FORGE_DIR / "output" / output_filename]:
+        for check_path in [
+            OUTPUT_DIR / output_filename,
+            FORGE_DIR / "output" / output_filename,
+        ]:
             if check_path.exists():
                 output_path = str(check_path)
                 break
-
+        
+        # Wait briefly for file system
+        if not output_path:
+            time.sleep(2)
+            for check_path in [
+                OUTPUT_DIR / output_filename,
+                FORGE_DIR / "output" / output_filename,
+            ]:
+                if check_path.exists():
+                    output_path = str(check_path)
+                    break
+        
         if output_path:
-            return output_path, f"ControlNet generation complete • Seed: {actual_seed}"
+            return output_path, f"Generated in {progress.format_time(progress.elapsed_seconds)} • Seed: {actual_seed}"
         else:
             return None, f"Output file not found: {output_filename}"
     elif status == "timeout":
-        return None, "Generation timed out"
+        return None, "Generation timed out after 10 minutes"
     else:
         return None, f"Generation failed: {progress.error_message or status}"
-
-
-def build_controlnet_workflow(
-    model_file: str,
-    controlnet_model: str,
-    control_image_path: str,
-    preprocessor: str,
-    prompt: str,
-    control_strength: float,
-    width: int,
-    height: int,
-    steps: int,
-    cfg: float,
-    seed: int,
-) -> dict:
-    """Build a ComfyUI workflow for ControlNet generation.
-
-    This is a simplified workflow that works with most ControlNet setups.
-    For advanced use cases, custom workflows can be loaded from files.
-    """
-    workflow = {
-        "1": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": model_file}
-        },
-        "2": {
-            "class_type": "ControlNetLoader",
-            "inputs": {"control_net_name": controlnet_model}
-        },
-        "3": {
-            "class_type": "LoadImage",
-            "inputs": {"image": control_image_path}
-        },
-        "4": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": prompt,
-                "clip": ["1", 1]
-            }
-        },
-        "5": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "text": "",
-                "clip": ["1", 1]
-            }
-        },
-        "6": {
-            "class_type": "EmptyLatentImage",
-            "inputs": {
-                "width": width,
-                "height": height,
-                "batch_size": 1
-            }
-        },
-    }
-
-    # Add preprocessor if needed
-    if preprocessor == "canny":
-        workflow["7"] = {
-            "class_type": "CannyEdgePreprocessor",
-            "inputs": {
-                "image": ["3", 0],
-                "low_threshold": 100,
-                "high_threshold": 200,
-            }
-        }
-        control_image_node = "7"
-    elif preprocessor == "depth":
-        workflow["7"] = {
-            "class_type": "MiDaS-DepthMapPreprocessor",
-            "inputs": {
-                "image": ["3", 0],
-                "a": 6.283185307179586,
-                "bg_threshold": 0.1,
-            }
-        }
-        control_image_node = "7"
-    elif preprocessor == "lineart":
-        workflow["7"] = {
-            "class_type": "LineArtPreprocessor",
-            "inputs": {
-                "image": ["3", 0],
-                "coarse": "disable",
-            }
-        }
-        control_image_node = "7"
-    else:
-        # No preprocessor - use image directly
-        control_image_node = "3"
-
-    # Apply ControlNet
-    workflow["8"] = {
-        "class_type": "ControlNetApplyAdvanced",
-        "inputs": {
-            "positive": ["4", 0],
-            "negative": ["5", 0],
-            "control_net": ["2", 0],
-            "image": [control_image_node, 0],
-            "strength": control_strength,
-            "start_percent": 0.0,
-            "end_percent": 1.0,
-        }
-    }
-
-    # KSampler
-    workflow["9"] = {
-        "class_type": "KSampler",
-        "inputs": {
-            "model": ["1", 0],
-            "positive": ["8", 0],
-            "negative": ["8", 1],
-            "latent_image": ["6", 0],
-            "seed": seed,
-            "steps": steps,
-            "cfg": cfg,
-            "sampler_name": "euler_ancestral",
-            "scheduler": "normal",
-            "denoise": 1.0,
-        }
-    }
-
-    # VAE Decode
-    workflow["10"] = {
-        "class_type": "VAEDecode",
-        "inputs": {
-            "samples": ["9", 0],
-            "vae": ["1", 2]
-        }
-    }
-
-    # Save
-    workflow["11"] = {
-        "class_type": "SaveImage",
-        "inputs": {
-            "images": ["10", 0],
-            "filename_prefix": "forge_controlnet"
-        }
-    }
-
-    return workflow
