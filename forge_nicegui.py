@@ -514,6 +514,111 @@ CUSTOM_CSS = """
 /* STATUS */
 .forge-status-ready { background: #22c55e; }
 .forge-status-error { background: #ef4444; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   IMAGE PANEL - Enhanced Output-Centric Layout
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Image container - slightly larger than video, dynamic aspect */
+.forge-image-container {
+    background: var(--surface-0) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    overflow: hidden;
+    max-width: 768px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+}
+.forge-image-container img {
+    max-width: 100%;
+    max-height: 600px;
+    width: auto;
+    height: auto;
+    display: block;
+}
+
+/* Quick actions bar below output */
+.forge-quick-action-btn {
+    background: var(--surface-3) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 6px !important;
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.8125rem !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.375rem !important;
+}
+.forge-quick-action-btn:hover {
+    background: var(--surface-4) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+}
+.forge-quick-action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Image history items - square thumbnails */
+.forge-history-item-img {
+    display: inline-block;
+    width: 60px;
+    height: 60px;
+    background: var(--surface-3);
+    border: 2px solid transparent;
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-right: 0.5rem;
+}
+.forge-history-item-img:hover {
+    border-color: var(--accent);
+    transform: scale(1.05);
+}
+.forge-history-item-img.active {
+    border-color: var(--accent);
+}
+.forge-history-item-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Video container enhancement */
+.forge-video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Frame upload for guided video generation */
+.forge-frame-upload {
+    width: 120px;
+    height: 80px;
+    background: var(--surface-3);
+    border: 2px dashed var(--border);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.forge-frame-upload:hover {
+    border-color: var(--accent);
+    background: var(--accent-muted);
+}
+.forge-frame-upload img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 4px;
+}
 </style>
 """
 
@@ -850,7 +955,7 @@ def image_generation_panel():
         # HERO AREA (Center) - Image Display + Quick Actions
         # ─────────────────────────────────────────────────────────────────────
         with ui.element('div').classes('forge-hero-area w-full'):
-            with ui.element('div').classes('forge-hero-container'):
+            with ui.element('div').classes('forge-image-container'):
                 refs['placeholder_col'] = ui.column().classes('items-center gap-2')
                 with refs['placeholder_col']:
                     ui.icon('image', size='48px').classes('text-zinc-600')
@@ -859,7 +964,7 @@ def image_generation_panel():
                 refs['output_img'] = ui.image('').classes('hidden')
 
             # Quick actions bar
-            with ui.row().classes('forge-quick-actions items-center'):
+            with ui.row().classes('forge-quick-actions items-center gap-2'):
                 refs['seed_display'] = ui.label('').classes('forge-seed-display hidden')
 
                 async def copy_seed():
@@ -867,7 +972,7 @@ def image_generation_panel():
                         await ui.run_javascript(f'navigator.clipboard.writeText("{state["last_seed"]}")')
                         ui.notify(f'Seed {state["last_seed"]} copied!', type='positive', position='top', timeout=1500)
 
-                refs['copy_seed_btn'] = ui.button(icon='content_copy', on_click=copy_seed).props('flat dense').classes('hidden').tooltip('Copy seed')
+                refs['copy_seed_btn'] = ui.button('📋 Copy Seed', on_click=copy_seed).props('flat dense no-caps').classes('forge-quick-action-btn hidden').tooltip('Copy seed')
 
                 async def download_image():
                     if state['last_output']:
@@ -878,7 +983,7 @@ def image_generation_panel():
                             a.click();
                         ''')
 
-                refs['download_btn'] = ui.button(icon='download', on_click=download_image).props('flat dense').classes('hidden').tooltip('Download')
+                refs['download_btn'] = ui.button('⬇ Download', on_click=download_image).props('flat dense no-caps').classes('forge-quick-action-btn hidden').tooltip('Download')
 
             # Progress bar
             with ui.column().classes('w-full max-w-lg gap-1 mt-3'):
@@ -1292,6 +1397,13 @@ def video_generation_panel():
                 refs['video_progress'].set_visibility(False)
                 refs['video_progress_text'] = ui.label('').classes('forge-progress-text text-center w-full')
                 refs['video_progress_text'].set_visibility(False)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # VIDEO HISTORY STRIP
+        # ─────────────────────────────────────────────────────────────────────
+        with ui.element('div').classes('forge-history-strip w-full') as video_history:
+            refs['video_history_container'] = video_history
+            ui.label('Recent videos will appear here').classes('text-zinc-500 text-xs')
 
         # Settings bar
         with ui.row().classes('w-full forge-settings-bar gap-8'):
