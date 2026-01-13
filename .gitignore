@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.eggs/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Output (generated files - don't commit user generations)
+output/
+*.webm
+*.mp4
+*.wav
+*.mp3
+*.flac
+
+# But DO allow sample/example outputs if explicitly added
+!output/.gitkeep
+
+# Don't commit large model files
+*.safetensors
+*.ckpt
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# Voice presets (user-specific)
+voices/*.wav
+voices/*.mp3
+!voices/.gitkeep
+
+# Config (may contain local paths)
+forge_config.json
+config.local.json
+
+# Logs
+*.log
+logs/
+
+# Test/temporary files
+.pytest_cache/
+.coverage
+htmlcov/
+tmp/
+temp/
+
+# Jupyter (if any)
+.ipynb_checkpoints/
