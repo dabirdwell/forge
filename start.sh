@@ -1,5 +1,5 @@
 #!/bin/bash
-# Forge Launcher - Starts ComfyUI (if needed) and launches Forge
+# NeoVak Launcher - Starts ComfyUI (if needed) and launches NeoVak
 # Usage: ./start.sh
 
 set -e
@@ -11,11 +11,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-FORGE_DIR="$(cd "$(dirname "$0")" && pwd)"
+NEOVAK_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMFYUI_URL="${COMFYUI_URL:-http://127.0.0.1:8188}"
-FORGE_PORT="${FORGE_PORT:-7861}"
+NEOVAK_PORT="${NEOVAK_PORT:-7861}"
 
-echo -e "${BLUE}🔥 Forge Launcher${NC}"
+echo -e "${BLUE}💡 NeoVak Launcher${NC}"
 echo ""
 
 # Function to check if ComfyUI is running
@@ -26,9 +26,9 @@ check_comfyui() {
 # Function to find ComfyUI installation
 find_comfyui() {
     # Check config file first
-    if [ -f "$FORGE_DIR/forge_config.json" ]; then
+    if [ -f "$NEOVAK_DIR/neovak_config.json" ]; then
         # Extract first model path and go up to find ComfyUI
-        CONFIG_PATH=$(python3 -c "import json; c=json.load(open('$FORGE_DIR/forge_config.json')); print(c.get('model_paths',[''])[0].replace('~','$HOME'))" 2>/dev/null || echo "")
+        CONFIG_PATH=$(python3 -c "import json; c=json.load(open('$NEOVAK_DIR/neovak_config.json')); print(c.get('model_paths',[''])[0].replace('~','$HOME'))" 2>/dev/null || echo "")
         if [ -n "$CONFIG_PATH" ] && [ -d "${CONFIG_PATH%/models}" ]; then
             COMFYUI_PATH="${CONFIG_PATH%/models}"
             if [ -f "$COMFYUI_PATH/main.py" ]; then
@@ -113,12 +113,12 @@ else
             exit 1
         fi
 
-        cd "$FORGE_DIR"
+        cd "$NEOVAK_DIR"
     else
         echo -e "${RED}✗ Could not find ComfyUI installation${NC}"
         echo ""
         echo "Please either:"
-        echo "  1. Start ComfyUI manually before running Forge"
+        echo "  1. Start ComfyUI manually before running NeoVak"
         echo "  2. Set COMFYUI_PATH environment variable"
         echo "  3. Install ComfyUI in ~/ComfyUI"
         echo ""
@@ -127,11 +127,11 @@ else
     fi
 fi
 
-# Activate Forge venv if it exists
-cd "$FORGE_DIR"
+# Activate NeoVak venv if it exists
+cd "$NEOVAK_DIR"
 if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
-    echo -e "${GREEN}✓ Activated Forge virtual environment${NC}"
+    echo -e "${GREEN}✓ Activated NeoVak virtual environment${NC}"
 fi
 
 # Check dependencies
@@ -141,9 +141,9 @@ if ! python3 -c "import nicegui" 2>/dev/null; then
 fi
 
 echo ""
-echo -e "${GREEN}🔥 Starting Forge...${NC}"
-echo -e "   Open ${BLUE}http://localhost:$FORGE_PORT${NC} in your browser"
+echo -e "${GREEN}💡 Starting NeoVak...${NC}"
+echo -e "   Open ${BLUE}http://localhost:$NEOVAK_PORT${NC} in your browser"
 echo ""
 
-# Start Forge
-python3 forge_nicegui.py
+# Start NeoVak
+python3 neovak_ui.py

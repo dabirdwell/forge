@@ -1,5 +1,5 @@
 #!/bin/bash
-# Forge - One-click launcher
+# NeoVak - One-click launcher
 # Just run: ./run.sh
 
 set -e
@@ -29,7 +29,7 @@ if [ -z "$PYTHON" ]; then
 fi
 
 echo ""
-echo "🔥 Starting Forge..."
+echo "💡 Starting NeoVak..."
 echo ""
 
 # Create virtual environment if needed
@@ -46,5 +46,5 @@ else
     source venv/bin/activate
 fi
 
-# Run Forge
-$PYTHON forge_nicegui.py
+# Run NeoVak
+$PYTHON neovak_ui.py

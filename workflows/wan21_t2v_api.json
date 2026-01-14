@@ -83,7 +83,7 @@
     "class_type": "SaveVideo",
     "inputs": {
       "video": ["49", 0],
-      "filename_prefix": "video/Forge_Wan",
+      "filename_prefix": "video/NeoVak_Wan",
       "format": "auto",
       "codec": "auto"
     }

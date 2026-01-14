@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build Forge.app - Native macOS Application
+# Build NeoVak.app - Native macOS Application
 # Creates a double-click app like LM Studio - no terminal needed
 #
 # Usage: ./packaging/build_app.sh
 #
-# The resulting Forge.app:
+# The resulting NeoVak.app:
 # - Opens a native window (not a browser)
 # - Auto-detects and starts ComfyUI
 # - First-run setup wizard
@@ -14,12 +14,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-APP_NAME="Forge"
+APP_NAME="NeoVak"
 APP_DIR="$PROJECT_DIR/dist/$APP_NAME.app"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.1.0}"
 
 echo ""
-echo "🔥 Forge App Builder v$VERSION"
+echo "💡 NeoVak App Builder v$VERSION"
 echo "   Creating native macOS application..."
 echo ""
 
@@ -69,33 +69,33 @@ mkdir -p "$PROJECT_DIR/dist"
 echo "Creating app bundle..."
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
-mkdir -p "$APP_DIR/Contents/Resources/forge"
+mkdir -p "$APP_DIR/Contents/Resources/neovak"
 
 # Copy application files
 echo "Copying application files..."
-cp "$PROJECT_DIR/forge_launcher.py" "$APP_DIR/Contents/Resources/forge/"
-cp "$PROJECT_DIR/forge_nicegui.py" "$APP_DIR/Contents/Resources/forge/"
-cp "$PROJECT_DIR/forge_backend.py" "$APP_DIR/Contents/Resources/forge/"
-cp "$PROJECT_DIR/forge_progress.py" "$APP_DIR/Contents/Resources/forge/" 2>/dev/null || true
-cp "$PROJECT_DIR/requirements.txt" "$APP_DIR/Contents/Resources/forge/"
-cp "$PROJECT_DIR/forge_config.example.json" "$APP_DIR/Contents/Resources/forge/"
-cp -r "$PROJECT_DIR/workflows" "$APP_DIR/Contents/Resources/forge/" 2>/dev/null || true
-cp -r "$PROJECT_DIR/voices" "$APP_DIR/Contents/Resources/forge/" 2>/dev/null || mkdir -p "$APP_DIR/Contents/Resources/forge/voices"
-cp -r "$PROJECT_DIR/docs" "$APP_DIR/Contents/Resources/forge/" 2>/dev/null || true
+cp "$PROJECT_DIR/neovak_launcher.py" "$APP_DIR/Contents/Resources/neovak/"
+cp "$PROJECT_DIR/neovak_ui.py" "$APP_DIR/Contents/Resources/neovak/"
+cp "$PROJECT_DIR/neovak_backend.py" "$APP_DIR/Contents/Resources/neovak/"
+cp "$PROJECT_DIR/neovak_progress.py" "$APP_DIR/Contents/Resources/neovak/" 2>/dev/null || true
+cp "$PROJECT_DIR/requirements.txt" "$APP_DIR/Contents/Resources/neovak/"
+cp "$PROJECT_DIR/neovak_config.example.json" "$APP_DIR/Contents/Resources/neovak/"
+cp -r "$PROJECT_DIR/workflows" "$APP_DIR/Contents/Resources/neovak/" 2>/dev/null || true
+cp -r "$PROJECT_DIR/voices" "$APP_DIR/Contents/Resources/neovak/" 2>/dev/null || mkdir -p "$APP_DIR/Contents/Resources/neovak/voices"
+cp -r "$PROJECT_DIR/docs" "$APP_DIR/Contents/Resources/neovak/" 2>/dev/null || true
 
 # Create the main launcher script
 # This opens a NATIVE WINDOW (not a browser) - like LM Studio
-cat > "$APP_DIR/Contents/MacOS/Forge" << 'LAUNCHER'
+cat > "$APP_DIR/Contents/MacOS/NeoVak" << 'LAUNCHER'
 #!/bin/bash
-# Forge Native Launcher
+# NeoVak Native Launcher
 # Opens app in a native window - no browser, no terminal
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RESOURCES="$APP_DIR/Resources"
-FORGE_DIR="$RESOURCES/forge"
+NEOVAK_DIR="$RESOURCES/neovak"
 VENV_DIR="$RESOURCES/venv"
-CONFIG_DIR="$HOME/.config/forge"
-LOG_FILE="$CONFIG_DIR/forge.log"
+CONFIG_DIR="$HOME/.config/neovak"
+LOG_FILE="$CONFIG_DIR/neovak.log"
 
 # Ensure config directory exists
 mkdir -p "$CONFIG_DIR"
@@ -105,14 +105,14 @@ log() {
 }
 
 show_error() {
-    osascript -e "display dialog \"$1\" buttons {\"OK\"} default button \"OK\" with title \"Forge Error\" with icon stop"
+    osascript -e "display dialog \"$1\" buttons {\"OK\"} default button \"OK\" with title \"NeoVak Error\" with icon stop"
 }
 
 show_progress() {
-    osascript -e "display notification \"$1\" with title \"Forge\""
+    osascript -e "display notification \"$1\" with title \"NeoVak\""
 }
 
-log "Starting Forge..."
+log "Starting NeoVak..."
 
 # Check for Python
 if ! command -v python3 &> /dev/null; then
@@ -123,14 +123,14 @@ fi
 # Create virtual environment if needed (first run)
 if [ ! -d "$VENV_DIR" ]; then
     log "First run - creating environment..."
-    show_progress "Setting up Forge for first use... (this takes a minute)"
+    show_progress "Setting up NeoVak for first use... (this takes a minute)"
 
     python3 -m venv "$VENV_DIR" 2>> "$LOG_FILE"
     source "$VENV_DIR/bin/activate"
 
     log "Installing dependencies..."
     pip install --upgrade pip >> "$LOG_FILE" 2>&1
-    pip install -r "$FORGE_DIR/requirements.txt" >> "$LOG_FILE" 2>&1
+    pip install -r "$NEOVAK_DIR/requirements.txt" >> "$LOG_FILE" 2>&1
 
     if [ $? -ne 0 ]; then
         show_error "Failed to install dependencies.\n\nCheck log at:\n$LOG_FILE"
@@ -143,19 +143,19 @@ fi
 source "$VENV_DIR/bin/activate"
 
 # Copy default config if needed
-if [ ! -f "$CONFIG_DIR/forge_config.json" ]; then
-    cp "$FORGE_DIR/forge_config.example.json" "$CONFIG_DIR/forge_config.json"
+if [ ! -f "$CONFIG_DIR/neovak_config.json" ]; then
+    cp "$NEOVAK_DIR/neovak_config.example.json" "$CONFIG_DIR/neovak_config.json"
 fi
 
-# Run Forge with native window
-cd "$FORGE_DIR"
-export FORGE_CONFIG="$CONFIG_DIR/forge_config.json"
+# Run NeoVak with native window
+cd "$NEOVAK_DIR"
+export NEOVAK_CONFIG="$CONFIG_DIR/neovak_config.json"
 
-log "Launching Forge..."
-exec python3 forge_launcher.py >> "$LOG_FILE" 2>&1
+log "Launching NeoVak..."
+exec python3 neovak_launcher.py >> "$LOG_FILE" 2>&1
 LAUNCHER
 
-chmod +x "$APP_DIR/Contents/MacOS/Forge"
+chmod +x "$APP_DIR/Contents/MacOS/NeoVak"
 
 # Create Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << PLIST
@@ -164,11 +164,11 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Forge</string>
+    <string>NeoVak</string>
     <key>CFBundleDisplayName</key>
-    <string>Forge</string>
+    <string>NeoVak</string>
     <key>CFBundleIdentifier</key>
-    <string>com.dabirdwell.forge</string>
+    <string>com.dabirdwell.neovak</string>
     <key>CFBundleVersion</key>
     <string>$VERSION</string>
     <key>CFBundleShortVersionString</key>
@@ -178,7 +178,7 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleExecutable</key>
-    <string>Forge</string>
+    <string>NeoVak</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
@@ -208,7 +208,7 @@ echo ""
 echo "   App location: $APP_DIR"
 echo ""
 echo "To install:"
-echo "   1. Drag Forge.app to /Applications"
+echo "   1. Drag NeoVak.app to /Applications"
 echo "   2. Double-click to run"
 echo ""
 echo "To create a DMG installer:"

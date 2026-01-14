@@ -1,6 +1,34 @@
 # Changelog
 
-All notable changes to Forge will be documented in this file.
+All notable changes to NeoVak will be documented in this file.
+
+## [1.1.0] - 2026-01-14
+
+### Changed
+- **Complete rebrand from Forge to NeoVak** — Retro-futuristic vacuum tube identity
+- Warm amber color scheme (#f59e0b) replacing cyan throughout
+- All core files renamed: forge_*.py → neovak_*.py
+- All CSS classes renamed: .forge-* → .neovak-*
+- All environment variables: FORGE_* → NEOVAK_*
+- Config directory: ~/.config/neovak
+- Output directory: ~/Documents/NeoVak-Output
+
+### Design
+- **New app icon** — Glowing vacuum tube design
+  - Amber filament glow
+  - Glass tube outline with base/socket
+  - Generated PNG (1024x1024) and ICNS for macOS
+- Tube state color system: cold (gray), warm (amber), hot (gold)
+- Blue filament accent (#3b82f6) for data flow indicators
+
+### Packaging
+- All build scripts updated for NeoVak (build_all.sh, build_app.sh, build_linux.sh, build_windows.bat)
+- create_icon.py rewritten with vacuum tube artwork
+- create_dmg.sh updated
+- Version bumped in all packaging scripts
+
+### Workflows
+- Output filename prefixes updated to "neovak" and "NeoVak_*"
 
 ## [1.0.0] - 2026-01-13
 
@@ -128,7 +156,6 @@ All notable changes to Forge will be documented in this file.
 - **Prompt Enhancement** — "✨ Enhance" button adds quality-boosting keywords
 - **Smart Model Detection** — Auto-applies optimal settings for Lightning/Turbo models
 - **Progress Indicator** — Visual feedback during generation
-- **Keyboard Shortcut** — Ctrl+Enter to generate (coming soon)
 - **Polished Button Animations** — Subtle hover effects for better feedback
 
 ### Changed

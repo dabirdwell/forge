@@ -52,7 +52,7 @@
   "9": {
     "class_type": "SaveImage",
     "inputs": {
-      "filename_prefix": "forge",
+      "filename_prefix": "neovak",
       "images": ["8", 0]
     }
   }

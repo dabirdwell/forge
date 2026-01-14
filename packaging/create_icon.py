@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Create Forge app icon.
+Create NeoVak app icon.
 Generates a 1024x1024 PNG and converts to .icns for macOS.
 
 The icon design:
 - Dark background with subtle gradient
-- Flame/forge icon in cyan (#06b6d4)
-- Modern, minimal, professional
+- Vacuum tube shape glowing amber (#f59e0b)
+- Warm, retro-futuristic, alive
 """
 
 import subprocess
@@ -26,7 +26,7 @@ OUTPUT_DIR = Path(__file__).parent
 
 
 def create_icon():
-    """Create the Forge app icon."""
+    """Create the NeoVak app icon - a glowing vacuum tube."""
 
     # Create base image with dark background
     img = Image.new('RGBA', (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
@@ -61,78 +61,107 @@ def create_icon():
 
     img = Image.alpha_composite(img, gradient)
 
-    # Draw flame icon
-    draw = ImageDraw.Draw(img)
-    accent = (6, 182, 212, 255)  # Cyan #06b6d4
-    accent_glow = (6, 182, 212, 80)
+    # Colors - amber/gold vacuum tube palette
+    amber = (245, 158, 11, 255)        # #f59e0b - primary accent
+    gold = (251, 191, 36, 255)         # #fbbf24 - hot/hover
+    amber_glow = (245, 158, 11, 60)    # Amber with transparency for glow
+    dark_amber = (180, 115, 8, 255)    # Darker amber for depth
+    hot_white = (255, 230, 180, 255)   # Warm white for filament
 
-    # Flame center point
-    cx, cy = ICON_SIZE // 2, ICON_SIZE // 2 + 30
+    # Center point
+    cx, cy = ICON_SIZE // 2, ICON_SIZE // 2
 
     # Draw glow effect first
     glow_img = Image.new('RGBA', (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow_img)
 
-    # Main flame shape (larger outer glow)
-    flame_points = [
-        (cx, cy - 280),       # Top tip
-        (cx + 180, cy - 100), # Right upper
-        (cx + 160, cy + 50),  # Right middle
-        (cx + 100, cy + 180), # Right lower
-        (cx, cy + 240),       # Bottom
-        (cx - 100, cy + 180), # Left lower
-        (cx - 160, cy + 50),  # Left middle
-        (cx - 180, cy - 100), # Left upper
-    ]
-
-    # Draw glow
-    glow_draw.polygon(flame_points, fill=accent_glow)
-    glow_img = glow_img.filter(ImageFilter.GaussianBlur(radius=40))
+    # Outer glow - large ellipse
+    glow_draw.ellipse(
+        [cx - 300, cy - 350, cx + 300, cy + 350],
+        fill=amber_glow
+    )
+    glow_img = glow_img.filter(ImageFilter.GaussianBlur(radius=60))
     img = Image.alpha_composite(img, glow_img)
 
     # Redraw on composited image
     draw = ImageDraw.Draw(img)
 
-    # Main flame (solid)
-    inner_flame = [
-        (cx, cy - 240),
-        (cx + 140, cy - 80),
-        (cx + 130, cy + 40),
-        (cx + 80, cy + 150),
-        (cx, cy + 200),
-        (cx - 80, cy + 150),
-        (cx - 130, cy + 40),
-        (cx - 140, cy - 80),
-    ]
-    draw.polygon(inner_flame, fill=accent)
+    # Tube glass outline (dark, subtle)
+    tube_outline = (40, 40, 40, 255)
+    draw.ellipse([cx - 180, cy - 280, cx + 180, cy + 280], outline=tube_outline, width=8)
 
-    # Inner detail - darker center to add depth
-    inner_detail = [
-        (cx, cy - 160),
-        (cx + 80, cy - 40),
-        (cx + 70, cy + 40),
-        (cx + 40, cy + 100),
-        (cx, cy + 130),
-        (cx - 40, cy + 100),
-        (cx - 70, cy + 40),
-        (cx - 80, cy - 40),
-    ]
-    darker_accent = (4, 140, 165, 255)  # Slightly darker cyan
-    draw.polygon(inner_detail, fill=darker_accent)
+    # Tube glass (very subtle, translucent)
+    glass_color = (60, 60, 60, 100)
+    draw.ellipse([cx - 170, cy - 270, cx + 170, cy + 270], fill=glass_color)
 
-    # Hot center - bright white-ish
-    hot_center = [
-        (cx, cy - 80),
-        (cx + 40, cy),
-        (cx + 35, cy + 30),
-        (cx + 20, cy + 60),
-        (cx, cy + 80),
-        (cx - 20, cy + 60),
-        (cx - 35, cy + 30),
-        (cx - 40, cy),
-    ]
-    hot_color = (150, 220, 235, 255)  # Light cyan, almost white
-    draw.polygon(hot_center, fill=hot_color)
+    # Base/socket (bottom of tube)
+    base_color = (50, 50, 50, 255)
+    draw.rounded_rectangle(
+        [cx - 120, cy + 180, cx + 120, cy + 300],
+        radius=20,
+        fill=base_color
+    )
+    # Base pins
+    for offset in [-70, -25, 25, 70]:
+        draw.rectangle(
+            [cx + offset - 8, cy + 280, cx + offset + 8, cy + 320],
+            fill=(80, 80, 80, 255)
+        )
+
+    # Top cap
+    draw.ellipse([cx - 80, cy - 300, cx + 80, cy - 240], fill=base_color)
+
+    # Inner glow (the "hot" part of the tube)
+    inner_glow = Image.new('RGBA', (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
+    inner_glow_draw = ImageDraw.Draw(inner_glow)
+    inner_glow_draw.ellipse(
+        [cx - 120, cy - 180, cx + 120, cy + 150],
+        fill=(245, 158, 11, 120)
+    )
+    inner_glow = inner_glow.filter(ImageFilter.GaussianBlur(radius=30))
+    img = Image.alpha_composite(img, inner_glow)
+
+    # Redraw on composited image
+    draw = ImageDraw.Draw(img)
+
+    # Filament structure (the glowing element inside)
+    # Vertical support wires
+    wire_color = (100, 100, 100, 255)
+    draw.line([(cx - 60, cy + 120), (cx - 60, cy - 160)], fill=wire_color, width=4)
+    draw.line([(cx + 60, cy + 120), (cx + 60, cy - 160)], fill=wire_color, width=4)
+
+    # Glowing filament (zigzag pattern)
+    filament_points = []
+    y_start = cy - 140
+    y_end = cy + 100
+    segments = 8
+    amplitude = 50
+
+    for i in range(segments + 1):
+        y = y_start + (y_end - y_start) * i / segments
+        x_offset = amplitude if i % 2 == 0 else -amplitude
+        filament_points.append((cx + x_offset, y))
+
+    # Draw filament with glow
+    filament_glow = Image.new('RGBA', (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
+    filament_glow_draw = ImageDraw.Draw(filament_glow)
+    filament_glow_draw.line(filament_points, fill=gold, width=16)
+    filament_glow = filament_glow.filter(ImageFilter.GaussianBlur(radius=8))
+    img = Image.alpha_composite(img, filament_glow)
+
+    # Sharp filament on top
+    draw = ImageDraw.Draw(img)
+    draw.line(filament_points, fill=hot_white, width=6)
+
+    # Bright center spot (hottest part)
+    bright_spot = Image.new('RGBA', (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
+    bright_draw = ImageDraw.Draw(bright_spot)
+    bright_draw.ellipse(
+        [cx - 30, cy - 30, cx + 30, cy + 30],
+        fill=(255, 240, 200, 180)
+    )
+    bright_spot = bright_spot.filter(ImageFilter.GaussianBlur(radius=15))
+    img = Image.alpha_composite(img, bright_spot)
 
     # Save PNG
     png_path = OUTPUT_DIR / "AppIcon.png"
@@ -153,22 +182,6 @@ def create_icon():
         if size <= 512:
             resized_2x = img.resize((size * 2, size * 2), Image.LANCZOS)
             resized_2x.save(iconset_dir / f"icon_{size}x{size}@2x.png")
-
-    # Rename files to match iconutil requirements
-    icon_map = {
-        "icon_16x16.png": "icon_16x16.png",
-        "icon_16x16@2x.png": "icon_16x16@2x.png",
-        "icon_32x32.png": "icon_32x32.png",
-        "icon_32x32@2x.png": "icon_32x32@2x.png",
-        "icon_64x64.png": "icon_32x32@2x.png",  # 64 = 32@2x
-        "icon_128x128.png": "icon_128x128.png",
-        "icon_128x128@2x.png": "icon_128x128@2x.png",
-        "icon_256x256.png": "icon_256x256.png",
-        "icon_256x256@2x.png": "icon_256x256@2x.png",
-        "icon_512x512.png": "icon_512x512.png",
-        "icon_512x512@2x.png": "icon_512x512@2x.png",
-        "icon_1024x1024.png": "icon_512x512@2x.png",
-    }
 
     # Try to create .icns
     try:

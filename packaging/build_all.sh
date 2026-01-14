@@ -1,15 +1,15 @@
 #!/bin/bash
-# Build Forge for all platforms
+# Build NeoVak for all platforms
 # Run on macOS to build macOS version, or on Linux for Linux version
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.1.0}"
 
 echo ""
-echo "🔥 Forge Build System v$VERSION"
+echo "💡 NeoVak Build System v$VERSION"
 echo ""
 
 # Detect platform

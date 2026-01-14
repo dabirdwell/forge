@@ -1,0 +1,9 @@
+{
+  "comfyui_path": "~/ComfyUI",
+  "comfyui_url": "http://127.0.0.1:8188",
+  "output_dir": "~/Documents/NeoVak-Output",
+  "model_paths": [
+    "~/ComfyUI/models",
+    "/Volumes/ExternalDrive/AI-Models/ComfyUI"
+  ]
+}
