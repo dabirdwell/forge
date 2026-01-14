@@ -74,3 +74,5 @@ temp/
 
 # Jupyter (if any)
 .ipynb_checkpoints/
+build/
+dist/
