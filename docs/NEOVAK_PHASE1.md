@@ -69,15 +69,16 @@ grep -ri "forge" --include="*.py" --include="*.sh" --include="*.json" | grep -v 
 
 ## Deferred to Phase 3
 - [ ] Vacuum tube UI components (animated states)
-- [ ] GitHub repo rename (dabirdwell/forge → dabirdwell/neovak)
+- [ ] GitHub repo rename (if applicable)
 - [ ] PyPI package name update (if applicable)
+- [x] Folder rename: `/Fawkes/Projects/Forge` → `/Fawkes/Products and Services/NeoVak` (2026-02-11)
 
 ---
 
 ## Git Commands for Release
 
 ```bash
-cd /Users/david/Documents/Fawkes/Projects/Forge
+cd /Users/david/Documents/Fawkes/Products\ and\ Services/NeoVak
 
 git add -A
 

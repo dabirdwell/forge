@@ -1,6 +1,6 @@
-# 📦 Distributing Forge
+# 📦 Distributing NeoVak
 
-This guide covers how to package and distribute Forge to other users.
+This guide covers how to package and distribute NeoVak to other users.
 
 ## Quick Build
 
@@ -22,8 +22,8 @@ This guide covers how to package and distribute Forge to other users.
 ```
 
 **Output:**
-- `dist/Forge.app` — Drag to Applications
-- `dist/Forge-1.0.0-macOS.dmg` — Professional installer
+- `dist/NeoVak.app` — Drag to Applications
+- `dist/NeoVak-1.0.0-macOS.dmg` — Professional installer
 
 **What users get:**
 - Double-click app to launch
@@ -40,11 +40,11 @@ packaging\build_windows.bat
 ```
 
 **Output:**
-- `dist/Forge-Windows/` folder
+- `dist/NeoVak-Windows/` folder
 - Zip this folder to distribute
 
 **What users get:**
-- `Start Forge.bat` — Double-click to run
+- `Start NeoVak.bat` — Double-click to run
 - First-run creates virtual environment
 - Auto-installs dependencies
 - Guides user to install ComfyUI if missing
@@ -56,11 +56,11 @@ packaging\build_windows.bat
 ```
 
 **Output:**
-- `dist/Forge-Linux/` folder
-- `dist/Forge-Linux-1.0.0.tar.gz` — Distributable tarball
+- `dist/NeoVak-Linux/` folder
+- `dist/NeoVak-Linux-1.0.0.tar.gz` — Distributable tarball
 
 **What users get:**
-- `./forge.sh` — Run from terminal
+- `./neovak.sh` — Run from terminal
 - Auto-detects ComfyUI
 - Desktop integration file included
 
@@ -87,9 +87,9 @@ git push origin v1.0.0
 VERSION=1.0.0 ./packaging/build_all.sh
 
 # Upload to GitHub Releases:
-# - Forge-1.0.0-macOS.dmg
-# - Forge-Windows-1.0.0.zip
-# - Forge-Linux-1.0.0.tar.gz
+# - NeoVak-1.0.0-macOS.dmg
+# - NeoVak-Windows-1.0.0.zip
+# - NeoVak-Linux-1.0.0.tar.gz
 ```
 
 ## What Users Need
@@ -119,7 +119,7 @@ VERSION=1.0.0 ./packaging/build_all.sh
 Common issues users may encounter:
 
 ### "ComfyUI not found"
-- Forge will prompt to locate ComfyUI
+- NeoVak will prompt to locate ComfyUI
 - User needs to browse to their ComfyUI folder
 - Path is saved to config for future launches
 
@@ -159,10 +159,10 @@ For wider distribution without security warnings:
 # Sign the app (requires Apple Developer account)
 codesign --deep --force --verify --verbose \
     --sign "Developer ID Application: Your Name" \
-    dist/Forge.app
+    dist/NeoVak.app
 
 # Notarize (required for distribution outside App Store)
-xcrun notarytool submit dist/Forge-1.0.0-macOS.dmg \
+xcrun notarytool submit dist/NeoVak-1.0.0-macOS.dmg \
     --apple-id "your@email.com" \
     --team-id "TEAMID" \
     --password "app-specific-password"

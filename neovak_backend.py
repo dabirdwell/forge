@@ -505,6 +505,7 @@ MEMORY_MULTIPLIERS = {
     "sdxl": 1.2,        # SDXL needs ~1.2x file size
     "sd15": 1.1,        # SD 1.5 is efficient
     "flux": 1.4,        # FLUX is memory hungry
+    "qwen": 1.3,        # 20B params + 7B text encoder, but FP8 helps
     "dreamshaper": 1.2,
     "realvis": 1.2,
     "lightning": 1.0,   # Lightning is optimized
@@ -728,6 +729,22 @@ SPECIFIC_MODEL_INFO = {
         "family": "musicgen", "type": "music",
         "desc": "Generate background music from text. Good for video soundtracks."
     },
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # QWEN IMAGE MODELS
+    # ─────────────────────────────────────────────────────────────────────────
+    "qwen_image_fp8": {
+        "family": "qwen", "type": "image",
+        "desc": "Qwen Image 2.0 FP8. Best-in-class text rendering, multilingual support, 2K native. 20B params in ~13GB."
+    },
+    "qwen_image_edit": {
+        "family": "qwen", "type": "edit",
+        "desc": "Qwen Image Edit. Multi-image editing with semantic control. Combine, swap, inject elements."
+    },
+    "qwen_image": {
+        "family": "qwen", "type": "image",
+        "desc": "Qwen Image 2.0. Best-in-class text rendering, multilingual typography, 2K native. Perfect for posters, infographics, comics."
+    },
 }
 
 # Family fallbacks (if specific model not matched)
@@ -742,6 +759,7 @@ FAMILY_FALLBACKS = {
     "dreamshaper": {"type": "image", "desc": "Artistic, painterly style. Great for fantasy."},
     "realvis": {"type": "image", "desc": "Photorealistic images. Best for lifelike results."},
     "flux": {"type": "image", "desc": "Latest generation. Best prompt following and quality."},
+    "qwen": {"type": "image", "desc": "Qwen Image 2.0. Professional typography rendering, multilingual text, 2K native."},
     "sd15": {"type": "image", "desc": "Classic SD 1.5. Fast, lightweight, huge community."},
     # Speech/TTS
     "chatterbox": {"type": "speech", "desc": "Voice cloning TTS. Expression tags, two quality modes.", "backend": "direct"},
@@ -800,6 +818,7 @@ def classify_model(filepath: Path) -> Dict[str, Any]:
         (["wan"], "wan"),
         (["hunyuan"], "hunyuan"),
         # Image
+        (["qwen_image", "qwen-image"], "qwen"),
         (["flux"], "flux"),
         (["dreamshaper"], "dreamshaper"),
         (["realvis", "realisticvision", "realistic_vision"], "realvis"),
@@ -1163,8 +1182,17 @@ def generate_image(prompt_text: str, model_name: str, width: int, height: int,
     if not running:
         return None, "ComfyUI not running. Start it first."
     
-    # Load workflow
-    workflow_path = WORKFLOWS_DIR / "sdxl_simple.json"
+    # Detect model family and select appropriate workflow
+    is_flux = "flux" in model_name.lower()
+    is_qwen = "qwen" in model_name.lower()
+    
+    if is_flux:
+        workflow_path = WORKFLOWS_DIR / "flux_simple.json"
+    elif is_qwen:
+        workflow_path = WORKFLOWS_DIR / "qwen_simple.json"
+    else:
+        workflow_path = WORKFLOWS_DIR / "sdxl_simple.json"
+    
     if not workflow_path.exists():
         return None, f"Workflow not found: {workflow_path}"
     
@@ -1195,16 +1223,37 @@ def generate_image(prompt_text: str, model_name: str, width: int, height: int,
         cls = node.get("class_type", "")
         inputs = node.get("inputs", {})
         
+        # SDXL-style nodes
         if cls == "CheckpointLoaderSimple":
             inputs["ckpt_name"] = model_file
         elif cls == "EmptyLatentImage":
             inputs["width"] = int(width)
             inputs["height"] = int(height)
+        
+        # Flux-style nodes
+        elif cls == "UNETLoader":
+            inputs["unet_name"] = model_file
+        elif cls == "EmptySD3LatentImage":
+            inputs["width"] = int(width)
+            inputs["height"] = int(height)
+        
         elif cls == "KSampler":
             inputs["seed"] = actual_seed
             
+            # Flux models need specific settings
+            if is_flux:
+                inputs["steps"] = min(int(steps), 8)  # Flux Schnell uses 4-8 steps
+                inputs["cfg"] = 1.0  # Flux uses very low CFG
+                inputs["sampler_name"] = "euler"
+                inputs["scheduler"] = "simple"
+            # Qwen Image uses FP8 defaults
+            elif is_qwen:
+                inputs["steps"] = int(steps) if steps != 20 else 20  # Default 20 for FP8
+                inputs["cfg"] = float(cfg) if cfg != 7.0 else 2.5   # Default 2.5 for FP8
+                inputs["sampler_name"] = "euler"
+                inputs["scheduler"] = "simple"
             # Lightning models need specific settings
-            if is_lightning:
+            elif is_lightning:
                 inputs["steps"] = 4  # Lightning is optimized for 4 steps
                 inputs["cfg"] = 1.5  # Low CFG for lightning
                 inputs["sampler_name"] = "euler"
@@ -2513,6 +2562,282 @@ MUSIC_STYLE_TAGS = [
     ("jazz", "Smooth, improvised"),
     ("classical", "Traditional, composed"),
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SOUND EFFECTS GENERATION (AudioGen / AudioLDM2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Sound effects are shorter and more specific than music
+SFX_DURATION_PRESETS = [
+    ("Instant", 0.5, "~0.5s - Clicks, hits, UI sounds"),
+    ("Short", 1.0, "~1s - Impacts, quick effects"),
+    ("Medium", 2.0, "~2s - Standard effects"),
+    ("Long", 4.0, "~4s - Complex sounds, transitions"),
+    ("Extended", 8.0, "~8s - Ambient loops, atmospheres"),
+]
+
+# Categories with example prompts for inspiration
+SFX_CATEGORIES = {
+    "nature": {
+        "label": "🌿 Nature",
+        "examples": ["thunder rumbling", "rain on window", "wind through trees", "ocean waves", "birds chirping", "fire crackling"],
+    },
+    "mechanical": {
+        "label": "⚙️ Mechanical",
+        "examples": ["car engine starting", "door creaking", "machine whirring", "clock ticking", "metal clanking", "hydraulic hiss"],
+    },
+    "human": {
+        "label": "👤 Human",
+        "examples": ["footsteps on gravel", "crowd murmuring", "breathing heavily", "applause", "laughter", "typing on keyboard"],
+    },
+    "impact": {
+        "label": "💥 Impact",
+        "examples": ["explosion distant", "glass shattering", "punch impact", "car crash", "gunshot", "thunder crack"],
+    },
+    "ambient": {
+        "label": "🌙 Ambient",
+        "examples": ["room tone quiet", "city traffic distant", "forest atmosphere", "underwater ambience", "spaceship interior hum", "wind howling"],
+    },
+    "ui_digital": {
+        "label": "🎮 UI/Digital",
+        "examples": ["notification chime", "button click", "error buzz", "power up", "coin collect", "whoosh transition"],
+    },
+    "musical": {
+        "label": "🎵 Musical",
+        "examples": ["drum hit", "cymbal crash", "bass drop", "synth stab", "guitar strum", "piano chord"],
+    },
+    "sci_fi": {
+        "label": "🚀 Sci-Fi",
+        "examples": ["laser beam", "teleport whoosh", "force field hum", "alien creature", "spaceship flyby", "energy charging"],
+    },
+}
+
+# Style modifiers for sound characteristics
+SFX_STYLE_TAGS = [
+    ("clean", "Clear, studio quality"),
+    ("distorted", "Crunchy, overdriven"),
+    ("reverb", "Spacious, echoing"),
+    ("dry", "Close, immediate"),
+    ("lo-fi", "Vintage, degraded"),
+    ("punchy", "Strong transients"),
+    ("subtle", "Soft, understated"),
+    ("dramatic", "Cinematic, intense"),
+]
+
+# Global state for AudioGen model (lazy loaded)
+_audiogen_model = None
+_audiogen_processor = None
+
+
+def get_sfx_model_status() -> dict:
+    """Check if AudioGen/AudioCraft is available."""
+    status = {
+        "available": False,
+        "model_loaded": _audiogen_model is not None,
+        "backend": None,
+        "install_hint": None,
+    }
+    
+    # Check for audiocraft (Meta's AudioGen)
+    try:
+        import audiocraft
+        status["available"] = True
+        status["backend"] = "audiocraft"
+        return status
+    except ImportError:
+        pass
+    
+    # Check for audioldm2 as fallback
+    try:
+        import diffusers
+        # Check if AudioLDM2 pipeline is available
+        from diffusers import AudioLDM2Pipeline
+        status["available"] = True
+        status["backend"] = "audioldm2"
+        return status
+    except (ImportError, AttributeError):
+        pass
+    
+    status["install_hint"] = "pip install audiocraft  # Meta's AudioGen (recommended)\n# or\npip install diffusers transformers  # AudioLDM2 fallback"
+    return status
+
+
+def load_sfx_model(backend: str = "auto") -> tuple[bool, str]:
+    """Load the sound effects generation model.
+    
+    Args:
+        backend: "audiocraft", "audioldm2", or "auto" (try audiocraft first)
+    
+    Returns:
+        Tuple of (success, status_message)
+    """
+    global _audiogen_model, _audiogen_processor
+    
+    if _audiogen_model is not None:
+        return True, "SFX model already loaded"
+    
+    status = get_sfx_model_status()
+    if not status["available"]:
+        return False, f"No SFX backend available.\n{status['install_hint']}"
+    
+    actual_backend = backend if backend != "auto" else status["backend"]
+    
+    try:
+        if actual_backend == "audiocraft":
+            from audiocraft.models import AudioGen
+            from audiocraft.data.audio import audio_write
+            
+            print("🔊 Loading AudioGen model...")
+            _audiogen_model = AudioGen.get_pretrained('facebook/audiogen-medium')
+            _audiogen_model.set_generation_params(duration=4.0)  # Default duration
+            _audiogen_processor = audio_write  # Store the write function
+            return True, "AudioGen loaded (facebook/audiogen-medium)"
+            
+        elif actual_backend == "audioldm2":
+            from diffusers import AudioLDM2Pipeline
+            import torch
+            
+            print("🔊 Loading AudioLDM2 model...")
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            _audiogen_model = AudioLDM2Pipeline.from_pretrained(
+                "cvssp/audioldm2",
+                torch_dtype=torch.float32,
+            ).to(device)
+            _audiogen_processor = "audioldm2"  # Flag for which backend
+            return True, f"AudioLDM2 loaded on {device}"
+            
+    except Exception as e:
+        return False, f"Failed to load SFX model: {str(e)}"
+    
+    return False, "Unknown backend"
+
+
+def unload_sfx_model():
+    """Unload the SFX model to free memory."""
+    global _audiogen_model, _audiogen_processor
+    _audiogen_model = None
+    _audiogen_processor = None
+    
+    # Force garbage collection
+    import gc
+    gc.collect()
+    
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except:
+        pass
+    
+    return True, "SFX model unloaded"
+
+
+def generate_sfx(
+    prompt: str,
+    duration: float = 2.0,
+    num_variations: int = 1,
+    progress_callback=None,
+) -> tuple[Optional[List[str]], str]:
+    """Generate sound effects from text description.
+    
+    Args:
+        prompt: Text description of the sound effect
+        duration: Length in seconds (0.5 - 10.0)
+        num_variations: Number of variations to generate (1-4)
+        progress_callback: Optional callback(percent, message)
+    
+    Returns:
+        Tuple of (list of output paths or None, status_message)
+    """
+    global _audiogen_model, _audiogen_processor
+    
+    # Clamp parameters
+    duration = max(0.5, min(10.0, duration))
+    num_variations = max(1, min(4, num_variations))
+    
+    if progress_callback:
+        progress_callback(5, "Checking SFX model...")
+    
+    # Auto-load model if needed
+    if _audiogen_model is None:
+        if progress_callback:
+            progress_callback(10, "Loading SFX model (first time)...")
+        success, msg = load_sfx_model()
+        if not success:
+            return None, msg
+    
+    if progress_callback:
+        progress_callback(20, f"Generating {duration}s sound effect...")
+    
+    try:
+        import torch
+        import scipy.io.wavfile as wav
+        from datetime import datetime
+        
+        output_paths = []
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Determine which backend we're using
+        if _audiogen_processor == "audioldm2":
+            # AudioLDM2 path
+            for i in range(num_variations):
+                if progress_callback:
+                    pct = 20 + int(70 * (i + 0.5) / num_variations)
+                    progress_callback(pct, f"Generating variation {i+1}/{num_variations}...")
+                
+                # Generate audio
+                audio = _audiogen_model(
+                    prompt,
+                    num_inference_steps=100,
+                    audio_length_in_s=duration,
+                ).audios[0]
+                
+                # Save to file
+                filename = f"sfx_{timestamp}_{i+1}.wav"
+                output_path = OUTPUT_DIR / filename
+                
+                # AudioLDM2 outputs at 16kHz
+                wav.write(str(output_path), 16000, audio)
+                output_paths.append(str(output_path))
+        
+        else:
+            # AudioCraft/AudioGen path
+            _audiogen_model.set_generation_params(duration=duration)
+            
+            # Generate all variations at once (more efficient)
+            prompts = [prompt] * num_variations
+            
+            if progress_callback:
+                progress_callback(30, "Running AudioGen...")
+            
+            wav_outputs = _audiogen_model.generate(prompts)
+            
+            if progress_callback:
+                progress_callback(80, "Saving audio files...")
+            
+            # Save each variation
+            for i, wav_output in enumerate(wav_outputs):
+                filename = f"sfx_{timestamp}_{i+1}"
+                output_path = OUTPUT_DIR / filename
+                
+                # audio_write adds .wav extension
+                _audiogen_processor(
+                    str(output_path),
+                    wav_output.cpu(),
+                    _audiogen_model.sample_rate,
+                    strategy="loudness",
+                    loudness_compressor=True,
+                )
+                output_paths.append(str(output_path) + ".wav")
+        
+        if progress_callback:
+            progress_callback(100, "Done!")
+        
+        return output_paths, f"Generated {num_variations} sound effect(s)"
+        
+    except Exception as e:
+        return None, f"SFX generation error: {str(e)}"
 
 
 def generate_music(

@@ -2,6 +2,29 @@
 
 All notable changes to NeoVak will be documented in this file.
 
+## [1.2.0] - 2026-01-15
+
+### Added
+- **Tube Status Indicators (Phase 2)** — Vacuum tube-inspired status lights next to model selectors
+  - **Cold state** — Dark gray when model not loaded
+  - **Warm state** — Gentle amber glow when ready/idle
+  - **Hot state** — Bright pulsing amber during generation
+  - **Error state** — Red flicker on failure
+- Tube indicators on both Image and Video generation panels
+- Full CSS animation system with warmup, pulse, and flicker keyframes
+- Glow effects using box-shadow for authentic tube appearance
+
+### Design
+- Inner glow gradient effect on warm/hot tubes
+- Smooth 0.5s transitions between states
+- Pulse animation at 1.2s interval during generation
+- Error flicker animation (3 cycles)
+
+### Technical
+- `.neovak-tube` base class with state modifiers (`.cold`, `.warm`, `.hot`, `.error`)
+- `.neovak-tube-bank` container for future multi-tube layouts
+- `.neovak-tube-indicator` wrapper with optional label support
+
 ## [1.1.0] - 2026-01-14
 
 ### Changed

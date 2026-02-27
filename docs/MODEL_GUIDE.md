@@ -1,6 +1,6 @@
 # 📦 Model Download Guide
 
-This guide helps you get the right AI models for Forge.
+This guide helps you get the right AI models for NeoVak.
 
 ## Quick Start (Minimum Setup)
 
@@ -18,6 +18,12 @@ For basic image generation, you only need **one checkpoint model**:
 - Download: [HuggingFace](https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_4step.safetensors)
 - Place in: `ComfyUI/models/checkpoints/`
 
+### Option C: Best Quality + Text Rendering (Recommended for 16GB+ RAM)
+**Qwen Image 2.0 FP8** - ~21 GB total (3 files)
+- Great for: Professional typography, posters, infographics, multilingual text, 2K images
+- See: [Qwen Image 2.0 section](#-qwen-image-20-best-text-rendering) below for download links
+- Place in: Multiple ComfyUI model folders (see section below)
+
 ---
 
 ## Full Model Setup by Tab
@@ -32,6 +38,31 @@ For basic image generation, you only need **one checkpoint model**:
 | RealVisXL V4 | 6.5 GB | 16GB+ | Photorealistic | [CivitAI](https://civitai.com/models/139562) |
 
 **Place in:** `ComfyUI/models/checkpoints/`
+
+### 🆕 Qwen Image 2.0 (Best Text Rendering)
+
+Qwen Image 2.0 is a 20B parameter image model with **best-in-class text rendering**. It can generate posters, infographics, comics, and any image requiring professional typography in English, Chinese, Korean, and Japanese.
+
+| Component | Size | Download |
+|-----------|------|----------|
+| Diffusion Model (FP8) | ~13 GB | [HuggingFace](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors) |
+| Text Encoder (FP8) | ~8 GB | [HuggingFace](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors) |
+| VAE | ~0.2 GB | [HuggingFace](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors) |
+| 4-Step LoRA (optional) | ~0.5 GB | [HuggingFace](https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V1.0.safetensors) |
+
+**File placement:**
+- Diffusion model → `ComfyUI/models/diffusion_models/`
+- Text encoder → `ComfyUI/models/text_encoders/`
+- VAE → `ComfyUI/models/vae/`
+- LoRA (optional) → `ComfyUI/models/loras/`
+
+**RAM requirement:** 16GB+ recommended (FP8 quantization). 24GB+ for best quality.
+
+**Tips:**
+- Use 20 steps, CFG 2.5, euler sampler for FP8 model
+- With 4-step LoRA: 4 steps, CFG 1.0 (much faster, slight quality tradeoff)
+- Supports native 2K resolution and all common aspect ratios
+- For text-heavy prompts, be specific about layout, font style, and placement
 
 ### 🔍 Upscalers (for Image Upscale mode)
 
@@ -96,7 +127,7 @@ ComfyUI/
 
 ### Memory Management
 
-Forge shows memory warnings if a model might not fit:
+NeoVak shows memory warnings if a model might not fit:
 - 🟢 Green = Should work fine
 - 🟡 Yellow = Might be tight, close other apps
 - 🟠 Orange = Risky, may fail or be slow
@@ -104,7 +135,7 @@ Forge shows memory warnings if a model might not fit:
 
 ### Model Naming
 
-Forge auto-detects model types from names:
+NeoVak auto-detects model types from names:
 - `lightning` → Uses 4 steps, low CFG
 - `turbo` → Uses 4-8 steps, low CFG
 - `xl` or `sdxl` → Uses SDXL settings
@@ -116,7 +147,7 @@ Forge auto-detects model types from names:
 2. Click "Download"
 3. Choose the `.safetensors` file (not `.ckpt` if available)
 4. Move to appropriate folder
-5. Restart Forge or click "Rescan for models"
+5. Restart NeoVak or click "Rescan for models"
 
 ### Downloading from HuggingFace
 
@@ -132,7 +163,7 @@ Forge auto-detects model types from names:
 ### "No models found"
 - Check that files are in `ComfyUI/models/checkpoints/`
 - Make sure file extension is `.safetensors` or `.ckpt`
-- Click "Rescan for models" in Forge
+- Click "Rescan for models" in NeoVak
 
 ### Model shows but won't load
 - Check RAM requirements

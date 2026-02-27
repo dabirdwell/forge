@@ -1,6 +1,6 @@
 """
 💡 NeoVak - Local AI Creative Suite
-Version 1.1.0
+Version 1.2.0
 
 A unified interface for AI image, video, voice, and music generation.
 Think "LM Studio for multimedia generation."
@@ -23,6 +23,9 @@ from neovak_backend import (
     get_voice_presets, resolve_voice_preset, VOICE_EXPRESSION_TAGS, VOICES_DIR,
     # Music generation
     generate_music, MUSIC_DURATION_PRESETS, MUSIC_STYLE_TAGS,
+    # Sound effects generation
+    generate_sfx, get_sfx_model_status, load_sfx_model, unload_sfx_model,
+    SFX_DURATION_PRESETS, SFX_CATEGORIES, SFX_STYLE_TAGS,
     # Image editing
     generate_img2img, generate_inpaint, upscale_image,
     IMG2IMG_STRENGTH_PRESETS, UPSCALER_MODELS,
@@ -40,14 +43,14 @@ from neovak_backend import (
 # ═══════════════════════════════════════════════════════════════════════════════
 
 APP_NAME = "NeoVak"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
-# Image mode presets
+# Image mode presets - (id, label, tooltip)
 IMAGE_MODES = [
-    ("generate", "Generate", "Create new images from prompts"),
-    ("variations", "Variations", "Create variations of existing images"),
-    ("inpaint", "Inpaint", "Draw mask and regenerate areas"),
-    ("upscale", "Upscale", "Enhance resolution of images"),
+    ("generate", "Generate", "Create new images from text descriptions. Describe what you want and the AI will paint it."),
+    ("variations", "Variations", "Upload an existing image and create alternate versions. Great for exploring different styles or compositions."),
+    ("inpaint", "Inpaint", "Edit specific areas of an image. Paint a mask over what you want to change, describe the replacement."),
+    ("upscale", "Upscale", "Increase resolution and enhance details of existing images. Makes small images larger without blur."),
 ]
 
 # Batch generation presets
@@ -64,14 +67,15 @@ BATCH_SEED_MODES = [
     ("fixed", "Fixed", "Same seed for all"),
 ]
 
-# Simplified presets - named for USE CASE, not technical specs
+# Simplified presets - named for USE CASE with aspect ratio display
+# Format: (name, width, height, hint, aspect_ratio)
 DIMENSION_PRESETS = [
-    ("Square", 1024, 1024, "Profile pics, icons, social posts"),
-    ("Portrait", 832, 1216, "People, characters, vertical art"),
-    ("Landscape", 1216, 832, "Scenes, environments, banners"),
-    ("Wide", 1344, 768, "Cinematic, desktop wallpapers"),
-    ("Tall", 768, 1344, "Phone wallpapers, stories"),
-    ("Custom", 1024, 1024, "Set your own dimensions"),
+    ("Square", 1024, 1024, "Profile pics, icons, social posts", "1:1"),
+    ("Portrait", 832, 1216, "People, characters, vertical art", "2:3"),
+    ("Landscape", 1216, 832, "Scenes, environments, banners", "3:2"),
+    ("Wide", 1344, 768, "Cinematic, desktop wallpapers", "16:9"),
+    ("Tall", 768, 1344, "Phone wallpapers, stories", "9:16"),
+    ("Custom", 1024, 1024, "Set your own dimensions", "—"),
 ]
 
 QUALITY_PRESETS = [
@@ -107,29 +111,44 @@ VIDEO_QUALITY_PRESETS = [
 CUSTOM_CSS = """
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════════
-   NEOVAK v1.1.0 - Retro-Futuristic Aesthetic
-   Warm, analog, alive - inspired by vacuum tube technology
+   NEOVAK v1.2.0 - Edison Steampunk Aesthetic
+   Warm tungsten glow, aged brass, patinated copper
+   Inspired by Edison's Menlo Park laboratory
    ═══════════════════════════════════════════════════════════════════════════════ */
 
-/* COLOR SYSTEM - Amber accent (NeoVak tube glow) */
+/* COLOR SYSTEM - Edison tungsten & aged brass */
 :root {
-    --accent: #f59e0b;
-    --accent-hover: #fbbf24;
-    --accent-muted: rgba(245, 158, 11, 0.15);
-    --tube-cold: #374151;
-    --tube-warm: #f59e0b;
-    --tube-hot: #fbbf24;
-    --filament-blue: #3b82f6;
-    --surface-0: #000000;
-    --surface-1: #0a0a0a;
-    --surface-2: #111111;
-    --surface-3: #1a1a1a;
-    --surface-4: #222222;
-    --border: #2a2a2a;
-    --border-subtle: #1f1f1f;
-    --text-primary: #ffffff;
-    --text-secondary: #999999;
-    --text-muted: #666666;
+    /* Edison filament glow - warm tungsten orange */
+    --accent: #d4912a;
+    --accent-hover: #e8a445;
+    --accent-muted: rgba(212, 145, 42, 0.15);
+    
+    /* Tube states - filament temperature */
+    --tube-cold: #3d3529;
+    --tube-warm: #d4912a;
+    --tube-hot: #f0c674;
+    --filament-bright: #fff4e0;
+    
+    /* Copper & brass accents */
+    --copper: #b87333;
+    --brass: #c9a227;
+    --patina: #4a7c6f;
+    
+    /* Aged surfaces - dark wood & iron */
+    --surface-0: #0a0908;
+    --surface-1: #12100e;
+    --surface-2: #1a1714;
+    --surface-3: #221f1a;
+    --surface-4: #2a2620;
+    
+    /* Borders - oxidized metal */
+    --border: #3d3529;
+    --border-subtle: #2a2620;
+    
+    /* Text - parchment tones */
+    --text-primary: #f5f0e8;
+    --text-secondary: #b8a992;
+    --text-muted: #7a6f5f;
 }
 
 /* BASE */
@@ -342,6 +361,67 @@ CUSTOM_CSS = """
     margin-bottom: 0.5rem;
 }
 .neovak-preset-options { display: flex; flex-direction: column; gap: 0.25rem; }
+
+/* VISUAL ASPECT RATIO SELECTOR */
+.neovak-aspect-selector {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.neovak-aspect-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: var(--surface-2);
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+    min-width: 64px;
+}
+.neovak-aspect-option:hover {
+    background: var(--surface-3);
+    border-color: var(--border);
+}
+.neovak-aspect-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-muted);
+}
+.neovak-aspect-shape {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neovak-aspect-shape-inner {
+    background: var(--surface-4);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neovak-aspect-option.selected .neovak-aspect-shape-inner {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 8px var(--accent-muted);
+}
+.neovak-aspect-name {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.neovak-aspect-option.selected .neovak-aspect-name {
+    color: var(--accent);
+}
+.neovak-aspect-dims {
+    font-size: 0.625rem;
+    color: var(--text-muted);
+    font-family: 'SF Mono', Monaco, monospace;
+}
+
 .neovak-radio-option {
     display: flex;
     align-items: center;
@@ -434,10 +514,184 @@ CUSTOM_CSS = """
 .q-slider__thumb { background: var(--text-primary) !important; border: none !important; width: 14px !important; height: 14px !important; }
 .q-slider__focus-ring { background: var(--accent-muted) !important; }
 
+/* SLIDER WITH VALUE INPUT - Combined control */
+.neovak-slider-control {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.neovak-slider-control .q-slider { flex: 1; }
+.neovak-slider-value {
+    width: 56px;
+    background: var(--surface-3) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 4px !important;
+    padding: 4px 8px !important;
+    font-size: 0.8125rem !important;
+    font-family: 'SF Mono', Monaco, monospace !important;
+    color: var(--accent) !important;
+    text-align: center !important;
+}
+.neovak-slider-value:focus {
+    border-color: var(--accent) !important;
+    outline: none !important;
+    box-shadow: 0 0 0 2px var(--accent-muted) !important;
+}
+
+/* Control labels with hint */
+.neovak-control-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+.neovak-control-name {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+.neovak-control-hint {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+.neovak-tooltip-icon {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--surface-4);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.625rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: help;
+}
+
 /* PROGRESS */
 .neovak-progress { background: var(--surface-3) !important; border-radius: 4px !important; height: 6px !important; }
 .neovak-progress .q-linear-progress__track { background: transparent !important; }
 .neovak-progress .q-linear-progress__model { background: var(--accent) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   NEOVAK TUBE STATUS INDICATORS - Phase 2
+   Vacuum tube-inspired status lights that show model/generation state
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+.neovak-tube {
+    width: 8px;
+    height: 24px;
+    border-radius: 4px;
+    background: var(--tube-cold);
+    transition: all 0.5s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Inner glow effect */
+.neovak-tube::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    right: 2px;
+    bottom: 2px;
+    border-radius: 2px;
+    background: transparent;
+    transition: all 0.5s ease;
+}
+
+/* Cold state - dark, inactive */
+.neovak-tube.cold {
+    background: var(--tube-cold);
+    box-shadow: none;
+}
+
+/* Warming state - transitioning to active */
+.neovak-tube.warming {
+    background: var(--tube-warm);
+    opacity: 0.7;
+    animation: tube-warmup 1.5s ease-in-out;
+}
+
+/* Warm state - ready, idle */
+.neovak-tube.warm {
+    background: var(--tube-warm);
+    box-shadow: 0 0 8px rgba(212, 145, 42, 0.5);
+}
+
+.neovak-tube.warm::after {
+    background: linear-gradient(180deg, rgba(240, 198, 116, 0.3) 0%, transparent 100%);
+}
+
+/* Hot/Active state - generating */
+.neovak-tube.hot {
+    background: var(--tube-hot);
+    box-shadow: 0 0 16px rgba(240, 198, 116, 0.6), 0 0 32px rgba(212, 145, 42, 0.4);
+    animation: tube-pulse 1.2s ease-in-out infinite;
+}
+
+.neovak-tube.hot::after {
+    background: linear-gradient(180deg, rgba(255, 244, 224, 0.5) 0%, rgba(240, 198, 116, 0.2) 50%, transparent 100%);
+}
+
+/* Error state - flicker */
+.neovak-tube.error {
+    background: #ef4444;
+    animation: tube-flicker 0.3s ease-in-out 3;
+}
+
+/* Tube animations */
+@keyframes tube-warmup {
+    0% { opacity: 0.3; background: var(--tube-cold); }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; background: var(--tube-warm); }
+}
+
+@keyframes tube-pulse {
+    0%, 100% { 
+        opacity: 0.85;
+        box-shadow: 0 0 12px rgba(240, 198, 116, 0.5), 0 0 24px rgba(212, 145, 42, 0.3);
+    }
+    50% { 
+        opacity: 1;
+        box-shadow: 0 0 20px rgba(240, 198, 116, 0.7), 0 0 40px rgba(212, 145, 42, 0.5);
+    }
+}
+
+@keyframes tube-flicker {
+    0%, 100% { opacity: 1; }
+    25% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+    75% { opacity: 0.3; }
+}
+
+/* Tube container for multiple tubes */
+.neovak-tube-bank {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 4px 8px;
+    background: var(--surface-3);
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+}
+
+/* Tube with label */
+.neovak-tube-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.neovak-tube-label {
+    font-size: 0.625rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
 .neovak-progress-text { font-size: 0.8125rem; color: var(--text-secondary); font-weight: 500; }
 
 /* TRANSPORT CONTROLS (Video) */
@@ -918,6 +1172,9 @@ def image_generation_panel():
         # COMMAND BAR (Top) - Model + Prompt + Enhance + Create
         # ─────────────────────────────────────────────────────────────────────
         with ui.row().classes('w-full neovak-command-bar items-center gap-3'):
+            # Tube status indicator
+            refs['tube'] = ui.element('div').classes('neovak-tube warm')
+            
             def on_model_select(m):
                 state['model'] = m
                 refs['model_btn'].text = m.name
@@ -930,6 +1187,8 @@ def image_generation_panel():
                                 ui.label(m.name).classes('text-white font-medium')
                                 ui.badge(m.family).props('color=primary outline dense')
                                 ui.label(f'{m.size_gb:.1f}GB').classes('text-zinc-500 text-xs')
+                            if m.description:
+                                ui.label(m.description).classes('text-zinc-400 text-xs')
 
             refs['prompt'] = ui.input(placeholder='Describe what you want to create...').classes('flex-1 neovak-command-prompt').props('dense outlined')
 
@@ -1008,9 +1267,10 @@ def image_generation_panel():
         # ─────────────────────────────────────────────────────────────────────
         with ui.row().classes('neovak-mode-tabs'):
             refs['mode_tab_buttons'] = {}
-            for mode_id, mode_label, _ in IMAGE_MODES:
+            for mode_id, mode_label, mode_tooltip in IMAGE_MODES:
                 btn = ui.button(mode_label, on_click=lambda m=mode_id: set_mode(m)).props('flat no-caps')
                 btn.classes('neovak-mode-tab' + (' active' if mode_id == 'generate' else ''))
+                btn.tooltip(mode_tooltip)
                 refs['mode_tab_buttons'][mode_id] = btn
 
         # ─────────────────────────────────────────────────────────────────────
@@ -1046,13 +1306,26 @@ def image_generation_panel():
                     refs['variation_upload'] = ui.upload(on_upload=handle_variation_upload, auto_upload=True).props('accept=image/* flat dense').classes('hidden')
                     refs['variation_source'].on('click', lambda: refs['variation_upload'].run_method('pickFiles'))
 
-                with ui.column().classes('gap-2 flex-1'):
-                    ui.label('Variation Strength').classes('text-zinc-400 text-xs')
-                    with ui.row().classes('items-center gap-3'):
+                with ui.column().classes('gap-1 flex-1'):
+                    with ui.row().classes('items-center gap-1'):
+                        ui.label('Variation Strength').classes('neovak-control-name')
+                        ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
+                            'Controls how much the new image differs from the original. '
+                            'Low (0.3-0.5) = subtle refinements, keeps most details. '
+                            'High (0.7-1.0) = dramatic changes, reimagines the image.'
+                        )
+                    with ui.row().classes('neovak-slider-control'):
                         refs['variation_strength'] = ui.slider(min=0.3, max=1.0, value=0.65, step=0.05).classes('flex-1')
-                        refs['variation_strength_label'] = ui.label('0.65').classes('text-zinc-300 text-xs w-10')
-                        refs['variation_strength'].on('update:model-value', lambda e: refs['variation_strength_label'].set_text(f'{e.args:.2f}'))
-                    ui.label('Low = subtle changes, High = major changes').classes('text-zinc-500 text-xs')
+                        refs['variation_strength_input'] = ui.number(value=0.65, min=0.1, max=1.0, step=0.05).classes('neovak-slider-value').props('dense borderless')
+                    
+                    def sync_var_from_slider(e):
+                        refs['variation_strength_input'].value = float(e.args)
+                    def sync_var_from_input(e):
+                        val = max(0.1, min(1.0, float(e.value or 0.65)))
+                        refs['variation_strength'].value = val
+                    refs['variation_strength'].on('update:model-value', sync_var_from_slider)
+                    refs['variation_strength_input'].on('update:model-value', sync_var_from_input)
+                    ui.label('0.5=refine, 0.8=reimagine').classes('neovak-control-hint')
         refs['variations_section'].set_visibility(False)
 
         # Inpaint mode inputs
@@ -1106,14 +1379,30 @@ def image_generation_panel():
         # SETTINGS BAR (Bottom) - Size and Quality presets
         # ─────────────────────────────────────────────────────────────────────
         with ui.row().classes('w-full neovak-settings-bar gap-8'):
-            # SIZE presets
+            # SIZE presets - Visual aspect ratio selector
             with ui.column().classes('neovak-preset-group'):
-                ui.label('SIZE').classes('neovak-preset-label')
+                with ui.row().classes('items-center gap-2 mb-2'):
+                    ui.label('CANVAS').classes('neovak-preset-label mb-0')
+                    ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
+                        'Choose the shape and size of your image. '
+                        'Square works for most uses. Portrait is better for people. '
+                        'Landscape and Wide work well for scenes and wallpapers.'
+                    )
                 refs['size_options'] = {}
+                
+                # Shape preview dimensions (normalized to max 32px)
+                SHAPE_SIZES = {
+                    "1:1": (32, 32),
+                    "2:3": (24, 36),
+                    "3:2": (36, 24),
+                    "16:9": (40, 22),
+                    "9:16": (22, 40),
+                    "—": (28, 28),  # Custom
+                }
 
                 def select_size(idx):
                     state['dim_preset'] = idx
-                    name, w, h, _ = DIMENSION_PRESETS[idx]
+                    name, w, h, _, _ = DIMENSION_PRESETS[idx]
                     state['width'] = w
                     state['height'] = h
                     for i, opt in refs['size_options'].items():
@@ -1123,14 +1412,17 @@ def image_generation_panel():
                             opt.classes(remove='selected')
                     refs['custom_size_row'].set_visibility(name == 'Custom')
 
-                with ui.column().classes('neovak-preset-options'):
-                    for i, (name, w, h, hint) in enumerate(DIMENSION_PRESETS):
-                        with ui.element('div').classes('neovak-radio-option' + (' selected' if i == 0 else '')) as opt:
+                with ui.row().classes('neovak-aspect-selector'):
+                    for i, (name, w, h, hint, aspect) in enumerate(DIMENSION_PRESETS):
+                        shape_w, shape_h = SHAPE_SIZES.get(aspect, (28, 28))
+                        with ui.element('div').classes('neovak-aspect-option' + (' selected' if i == 0 else '')) as opt:
                             opt.on('click', lambda i=i: select_size(i))
-                            ui.element('div').classes('radio-dot')
-                            with ui.row().classes('items-center gap-2'):
-                                ui.label(name).classes('text-zinc-200')
-                                ui.label(f'{w}×{h}').classes('text-zinc-500 text-xs')
+                            # Visual shape preview
+                            with ui.element('div').classes('neovak-aspect-shape').style(f'width: 44px; height: 44px;'):
+                                ui.element('div').classes('neovak-aspect-shape-inner').style(f'width: {shape_w}px; height: {shape_h}px;')
+                            ui.label(name).classes('neovak-aspect-name')
+                            if name != 'Custom':
+                                ui.label(f'{w}×{h}').classes('neovak-aspect-dims')
                             opt.tooltip(hint)
                         refs['size_options'][i] = opt
 
@@ -1171,19 +1463,69 @@ def image_generation_panel():
 
             ui.element('div').classes('flex-1')  # Spacer
 
-            # Advanced settings
-            with ui.expansion('▾ Advanced', value=False).classes('neovak-advanced-toggle').props('dense'):
-                with ui.row().classes('gap-6 p-3'):
-                    with ui.column().classes('gap-2'):
-                        ui.label('Seed').classes('text-zinc-400 text-xs')
+            # Advanced settings - Power controls with human-readable names
+            with ui.expansion('▾ Fine-Tune', value=False).classes('neovak-advanced-toggle').props('dense'):
+                with ui.row().classes('gap-6 p-4 flex-wrap'):
+                    # SEED - Reproducibility control
+                    with ui.column().classes('gap-1'):
+                        with ui.row().classes('items-center gap-1'):
+                            ui.label('Seed').classes('neovak-control-name')
+                            ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
+                                'The random seed determines the starting point for generation. '
+                                'Use the same seed + prompt to recreate an exact image. '
+                                '-1 means random (different each time).'
+                            )
                         refs['seed'] = ui.number(value=-1).classes('w-28').props('dense outlined')
-                        ui.label('-1 = random').classes('text-zinc-500 text-xs')
-                    with ui.column().classes('gap-2'):
-                        ui.label('Steps').classes('text-zinc-400 text-xs')
-                        refs['steps_slider'] = ui.slider(min=10, max=60, value=30).classes('w-32')
-                    with ui.column().classes('gap-2'):
-                        ui.label('CFG').classes('text-zinc-400 text-xs')
-                        refs['cfg_slider'] = ui.slider(min=1, max=15, value=7, step=0.5).classes('w-32')
+                        ui.label('−1 = surprise me').classes('neovak-control-hint')
+                    
+                    # STEPS - Quality/detail control
+                    with ui.column().classes('gap-1 min-w-48'):
+                        with ui.row().classes('items-center gap-1'):
+                            ui.label('Refinement').classes('neovak-control-name')
+                            ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
+                                'How many passes the AI makes to refine your image. '
+                                'More steps = finer details but slower. '
+                                '15-20 for drafts, 30-40 for quality, 50+ for maximum detail.'
+                            )
+                        with ui.row().classes('neovak-slider-control'):
+                            refs['steps_slider'] = ui.slider(min=10, max=60, value=30).classes('flex-1')
+                            refs['steps_input'] = ui.number(value=30, min=10, max=100).classes('neovak-slider-value').props('dense borderless')
+                        
+                        def sync_steps_from_slider(e):
+                            refs['steps_input'].value = int(e.args)
+                            state['steps'] = int(e.args)
+                        def sync_steps_from_input(e):
+                            val = max(10, min(100, int(e.value or 30)))
+                            refs['steps_slider'].value = min(60, val)
+                            state['steps'] = val
+                        refs['steps_slider'].on('update:model-value', sync_steps_from_slider)
+                        refs['steps_input'].on('update:model-value', sync_steps_from_input)
+                        ui.label('10=fast draft, 50+=fine art').classes('neovak-control-hint')
+                    
+                    # CFG - Prompt adherence control  
+                    with ui.column().classes('gap-1 min-w-48'):
+                        with ui.row().classes('items-center gap-1'):
+                            ui.label('Prompt Strength').classes('neovak-control-name')
+                            ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
+                                'How strictly the AI follows your prompt vs being creative. '
+                                'Low (1-5) = artistic freedom, may surprise you. '
+                                'Medium (6-8) = balanced, recommended. '
+                                'High (9-15) = literal interpretation, can look artificial.'
+                            )
+                        with ui.row().classes('neovak-slider-control'):
+                            refs['cfg_slider'] = ui.slider(min=1, max=15, value=7, step=0.5).classes('flex-1')
+                            refs['cfg_input'] = ui.number(value=7, min=1, max=20, step=0.5).classes('neovak-slider-value').props('dense borderless')
+                        
+                        def sync_cfg_from_slider(e):
+                            refs['cfg_input'].value = float(e.args)
+                            state['cfg'] = float(e.args)
+                        def sync_cfg_from_input(e):
+                            val = max(1, min(20, float(e.value or 7)))
+                            refs['cfg_slider'].value = min(15, val)
+                            state['cfg'] = val
+                        refs['cfg_slider'].on('update:model-value', sync_cfg_from_slider)
+                        refs['cfg_input'].on('update:model-value', sync_cfg_from_input)
+                        ui.label('7=balanced, lower=creative').classes('neovak-control-hint')
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # GENERATE FUNCTION
@@ -1207,6 +1549,9 @@ def image_generation_panel():
         refs['gen_btn'].text = '⏳ Creating...'
         refs['progress'].set_visibility(True)
         refs['progress_text'].set_visibility(True)
+        
+        # Tube goes hot during generation
+        refs['tube'].classes(remove='cold warm error', add='hot')
 
         import time as time_module
         start_time = time_module.time()
@@ -1299,11 +1644,15 @@ def image_generation_panel():
             is_generating = False
             refs['progress_text'].set_text(f'✗ Error: {str(e)}')
             ui.notify(str(e), type='negative')
+            # Tube flickers on error
+            refs['tube'].classes(remove='hot warm', add='error')
         finally:
             is_generating = False
             progress_task.cancel()
             refs['gen_btn'].enable()
             refs['gen_btn'].text = 'Create'
+            # Tube returns to warm (ready) state
+            refs['tube'].classes(remove='hot error', add='warm')
             await asyncio.sleep(2)
             refs['progress'].set_visibility(False)
             refs['progress_text'].set_visibility(False)
@@ -1348,6 +1697,9 @@ def video_generation_panel():
     with ui.column().classes('w-full gap-4'):
         # Command bar
         with ui.row().classes('w-full neovak-command-bar items-center gap-3'):
+            # Tube status indicator
+            refs['tube'] = ui.element('div').classes('neovak-tube warm')
+            
             def on_video_model_select(m):
                 state['model'] = m
                 refs['video_model_btn'].text = m.name
@@ -1458,6 +1810,9 @@ def video_generation_panel():
         refs['video_gen_btn'].text = '⏳ Creating...'
         refs['video_progress'].set_visibility(True)
         refs['video_progress_text'].set_visibility(True)
+        
+        # Tube goes hot during generation
+        refs['tube'].classes(remove='cold warm error', add='hot')
 
         import time as time_module
         start_time = time_module.time()
@@ -1515,11 +1870,15 @@ def video_generation_panel():
             is_generating = False
             refs['video_progress_text'].set_text(f'✗ Error')
             ui.notify(str(e), type='negative')
+            # Tube flickers on error
+            refs['tube'].classes(remove='hot warm', add='error')
         finally:
             is_generating = False
             progress_task.cancel()
             refs['video_gen_btn'].enable()
             refs['video_gen_btn'].text = 'Create'
+            # Tube returns to warm (ready) state
+            refs['tube'].classes(remove='hot error', add='warm')
             await asyncio.sleep(2)
             refs['video_progress'].set_visibility(False)
             refs['video_progress_text'].set_visibility(False)
@@ -1530,7 +1889,19 @@ def video_generation_panel():
 
 def voice_generation_panel():
     """Voice generation with Chatterbox TTS."""
-    state = {'speed': 1.0, 'voice_sample': None}
+    # Discover speech models
+    all_models = discover_all_models()
+    speech_models = all_models.get('speech', [])
+    
+    # Check if we have real models or using built-in
+    has_real_models = len(speech_models) > 0
+    if not speech_models:
+        # Use built-in Chatterbox (downloads from HuggingFace on first use)
+        speech_models = [Model(name="Chatterbox TTS", path=Path("."), family="chatterbox", size_gb=2.0, 
+                              tier_required="lite", media_type="speech", 
+                              description="Expressive text-to-speech with emotion tags. Downloads automatically on first use (~2GB).")]
+    
+    state = {'speed': 1.0, 'voice_sample': None, 'model': speech_models[0]}
     refs = {}
 
     with ui.column().classes('w-full max-w-2xl mx-auto gap-6 py-6'):
@@ -1538,7 +1909,47 @@ def voice_generation_panel():
         ui.label('Text-to-speech with expression tags').classes('neovak-subtitle mb-4')
 
         with ui.card().classes('w-full neovak-card p-6'):
-            ui.label('TEXT').classes('neovak-section-header')
+            # ALWAYS show current model info
+            with ui.row().classes('items-center gap-2 mb-4'):
+                ui.label('MODEL').classes('neovak-section-header mb-0')
+                ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
+                    'The AI model used for speech synthesis. '
+                    'Chatterbox TTS is built-in and downloads automatically. '
+                    'Additional models can be added to your ComfyUI models folder.'
+                )
+            
+            with ui.row().classes('items-center gap-3 p-3 rounded-lg').style('background: var(--surface-2);'):
+                ui.icon('record_voice_over', size='24px').classes('text-amber-500')
+                with ui.column().classes('gap-0.5 flex-1'):
+                    if len(speech_models) > 1:
+                        # Multiple models - show dropdown
+                        def on_speech_model_select(m):
+                            state['model'] = m
+                            refs['speech_model_btn'].text = m.name
+                        
+                        with ui.dropdown_button(speech_models[0].name, auto_close=True).props('no-caps dropdown-icon=expand_more color=dark dense') as refs['speech_model_btn']:
+                            for m in speech_models:
+                                with ui.item(on_click=lambda m=m: on_speech_model_select(m)).classes('neovak-model-item'):
+                                    with ui.column().classes('gap-0.5 py-1'):
+                                        with ui.row().classes('items-center gap-2'):
+                                            ui.label(m.name).classes('text-white font-medium')
+                                            ui.badge(m.family).props('color=primary outline dense')
+                                            if m.size_gb > 0:
+                                                ui.label(f'{m.size_gb:.1f}GB').classes('text-zinc-500 text-xs')
+                                        if m.description:
+                                            ui.label(m.description).classes('text-zinc-400 text-xs')
+                    else:
+                        # Single model - show info directly
+                        m = speech_models[0]
+                        with ui.row().classes('items-center gap-2'):
+                            ui.label(m.name).classes('text-white font-medium')
+                            ui.badge(m.family).props('color=primary outline dense')
+                            if m.size_gb > 0:
+                                ui.label(f'~{m.size_gb:.1f}GB').classes('text-zinc-500 text-xs')
+                        if m.description:
+                            ui.label(m.description).classes('text-zinc-400 text-xs')
+            
+            ui.label('TEXT').classes('neovak-section-header mt-4')
             refs['text'] = ui.textarea(placeholder='Enter text to speak... Use tags like [laugh], [sigh], [gasp] for expressions').classes('w-full neovak-prompt').props('outlined autogrow rows=4')
 
             ui.label('EXPRESSION TAGS').classes('neovak-section-header mt-4')
@@ -1548,11 +1959,27 @@ def voice_generation_panel():
                         refs['text'].value = (refs['text'].value or '') + f' [{t}]'
                     ui.button(f'[{tag}]', on_click=add_tag).props('flat dense size=sm').classes('text-zinc-400')
 
-            ui.label('SPEED').classes('neovak-section-header mt-4')
-            with ui.row().classes('items-center gap-4'):
-                refs['speed'] = ui.slider(min=0.5, max=2.0, value=1.0, step=0.1).classes('flex-1')
-                refs['speed_label'] = ui.label('1.0x').classes('text-zinc-300 w-12')
-                refs['speed'].on('update:model-value', lambda e: refs['speed_label'].set_text(f'{e.args:.1f}x'))
+            with ui.column().classes('gap-1 mt-4'):
+                with ui.row().classes('items-center gap-1'):
+                    ui.label('Speed').classes('neovak-control-name')
+                    ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
+                        'Playback speed of the generated speech. '
+                        '0.5x = slow and deliberate. '
+                        '1.0x = natural pace. '
+                        '2.0x = fast, energetic.'
+                    )
+                with ui.row().classes('neovak-slider-control'):
+                    refs['speed'] = ui.slider(min=0.5, max=2.0, value=1.0, step=0.1).classes('flex-1')
+                    refs['speed_input'] = ui.number(value=1.0, min=0.25, max=3.0, step=0.1).classes('neovak-slider-value').props('dense borderless')
+                
+                def sync_speed_from_slider(e):
+                    refs['speed_input'].value = float(e.args)
+                def sync_speed_from_input(e):
+                    val = max(0.25, min(3.0, float(e.value or 1.0)))
+                    refs['speed'].value = min(2.0, max(0.5, val))
+                refs['speed'].on('update:model-value', sync_speed_from_slider)
+                refs['speed_input'].on('update:model-value', sync_speed_from_input)
+                ui.label('1.0x=natural, type up to 3x').classes('neovak-control-hint')
 
         refs['voice_gen_btn'] = ui.button('🎤 Generate Voice', on_click=lambda: do_generate_voice()).classes('w-full neovak-btn-primary')
 
@@ -1603,7 +2030,16 @@ def voice_generation_panel():
 
 def music_generation_panel():
     """Music generation panel."""
-    state = {'duration': 15, 'style': None}
+    # Discover music models
+    all_models = discover_all_models()
+    music_models = all_models.get('music', [])
+    if not music_models:
+        # Fallback placeholder
+        music_models = [Model(name="MusicGen", path=Path("."), family="Audio", size_gb=0,
+                             tier_required="pro", media_type="music",
+                             description="Generate music from text descriptions")]
+    
+    state = {'duration': 15, 'style': None, 'model': music_models[0]}
     refs = {}
 
     with ui.column().classes('w-full max-w-2xl mx-auto gap-6 py-6'):
@@ -1611,6 +2047,26 @@ def music_generation_panel():
         ui.label('Create music from text descriptions').classes('neovak-subtitle mb-4')
 
         with ui.card().classes('w-full neovak-card p-6'):
+            # Model selection
+            if len(music_models) > 1:
+                ui.label('MODEL').classes('neovak-section-header mb-2')
+                with ui.row().classes('items-center gap-2 mb-4'):
+                    def on_music_model_select(m):
+                        state['model'] = m
+                        refs['music_model_btn'].text = m.name
+                    
+                    with ui.dropdown_button(music_models[0].name, auto_close=True).classes('shrink-0').props('no-caps dropdown-icon=expand_more color=dark dense') as refs['music_model_btn']:
+                        for m in music_models:
+                            with ui.item(on_click=lambda m=m: on_music_model_select(m)).classes('neovak-model-item'):
+                                with ui.column().classes('gap-0.5 py-1'):
+                                    with ui.row().classes('items-center gap-2'):
+                                        ui.label(m.name).classes('text-white font-medium')
+                                        ui.badge(m.family).props('color=primary outline dense')
+                                        if m.size_gb > 0:
+                                            ui.label(f'{m.size_gb:.1f}GB').classes('text-zinc-500 text-xs')
+                                    if m.description:
+                                        ui.label(m.description).classes('text-zinc-400 text-xs')
+            
             ui.label('DESCRIPTION').classes('neovak-section-header')
             refs['music_prompt'] = ui.textarea(placeholder='Describe the music you want... e.g., "upbeat electronic dance track with synths"').classes('w-full neovak-prompt').props('outlined autogrow rows=3')
 
@@ -1624,12 +2080,13 @@ def music_generation_panel():
             ui.label('DURATION').classes('neovak-section-header mt-4')
             refs['duration_btns'] = []
             with ui.row().classes('gap-2'):
-                for dur, label in MUSIC_DURATION_PRESETS:
-                    def select_dur(d=dur, idx=MUSIC_DURATION_PRESETS.index((dur, label))):
+                for i, (label, dur, desc) in enumerate(MUSIC_DURATION_PRESETS):
+                    def select_dur(d=dur, idx=i):
                         state['duration'] = d
                         for j, btn in enumerate(refs['duration_btns']):
                             btn.props('color=primary' if j == idx else 'color=dark')
                     btn = ui.button(label, on_click=select_dur).props(f'dense no-caps {"color=primary" if dur == 15 else "color=dark"}')
+                    btn.tooltip(desc)
                     refs['duration_btns'].append(btn)
 
         refs['music_gen_btn'] = ui.button('🎵 Generate Music', on_click=lambda: do_generate_music()).classes('w-full neovak-btn-primary')
@@ -1675,6 +2132,185 @@ def music_generation_panel():
             refs['music_gen_btn'].enable()
             refs['music_progress'].set_visibility(False)
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SOUND EFFECTS GENERATION PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def sfx_generation_panel():
+    """Sound effects generation panel using AudioGen."""
+    
+    state = {
+        'duration': 2.0,
+        'category': None,
+        'variations': 1,
+    }
+    refs = {}
+    
+    # Check SFX model status
+    sfx_status = get_sfx_model_status()
+
+    with ui.column().classes('w-full max-w-2xl mx-auto gap-6 py-6'):
+        ui.label('🔊 Sound Effects').classes('neovak-title')
+        ui.label('Generate sound effects from text descriptions').classes('neovak-subtitle mb-4')
+        
+        # Show install hint if not available
+        if not sfx_status['available']:
+            with ui.card().classes('w-full neovak-card p-6 border-amber-500/30'):
+                ui.label('⚠️ AudioGen Not Installed').classes('text-amber-400 font-medium mb-2')
+                ui.label('Sound effects generation requires AudioCraft or AudioLDM2.').classes('text-zinc-400 text-sm mb-3')
+                with ui.element('pre').classes('bg-zinc-900 p-3 rounded text-xs text-zinc-300 overflow-x-auto'):
+                    ui.label('pip install audiocraft  # Recommended')
+                ui.label('After installing, restart NeoVak.').classes('text-zinc-500 text-xs mt-2')
+
+        with ui.card().classes('w-full neovak-card p-6'):
+            # Category inspiration buttons
+            ui.label('CATEGORY').classes('neovak-section-header')
+            
+            with ui.row().classes('gap-2 flex-wrap mb-4'):
+                for cat_id, cat_info in SFX_CATEGORIES.items():
+                    def select_category(c=cat_id, info=cat_info):
+                        state['category'] = c
+                        # Show random example from category
+                        import random
+                        example = random.choice(info['examples'])
+                        refs['sfx_prompt'].value = example
+                        ui.notify(f'Try: "{example}"', type='info')
+                    
+                    ui.button(
+                        cat_info['label'],
+                        on_click=select_category
+                    ).props('flat dense size=sm').classes('text-zinc-400 hover:text-amber-400')
+            
+            # Main prompt input
+            ui.label('DESCRIPTION').classes('neovak-section-header')
+            refs['sfx_prompt'] = ui.textarea(
+                placeholder='Describe the sound... e.g., "thunder rolling in the distance" or "footsteps on wooden floor"'
+            ).classes('w-full neovak-prompt').props('outlined autogrow rows=2')
+            
+            # Quick examples row
+            with ui.row().classes('gap-2 flex-wrap mt-2'):
+                quick_examples = ['door slam', 'rain on roof', 'crowd cheering', 'laser beam', 'clock ticking']
+                for ex in quick_examples:
+                    ui.button(
+                        ex,
+                        on_click=lambda e=ex: refs['sfx_prompt'].set_value(e)
+                    ).props('flat dense size=sm').classes('text-zinc-500 text-xs')
+
+            # Duration selection
+            ui.label('DURATION').classes('neovak-section-header mt-4')
+            refs['duration_btns'] = []
+            with ui.row().classes('gap-2'):
+                for i, (label, dur, desc) in enumerate(SFX_DURATION_PRESETS):
+                    def select_dur(d=dur, idx=i):
+                        state['duration'] = d
+                        for j, btn in enumerate(refs['duration_btns']):
+                            btn.props('color=primary' if j == idx else 'color=dark')
+                    
+                    is_default = (dur == 2.0)
+                    btn = ui.button(
+                        label,
+                        on_click=select_dur
+                    ).props(f'dense no-caps {"color=primary" if is_default else "color=dark"}')
+                    btn.tooltip(desc)
+                    refs['duration_btns'].append(btn)
+            
+            # Style modifiers
+            ui.label('STYLE').classes('neovak-section-header mt-4')
+            with ui.row().classes('gap-2 flex-wrap'):
+                for tag, desc in SFX_STYLE_TAGS:
+                    def add_style(t=tag):
+                        current = refs['sfx_prompt'].value or ''
+                        if t not in current.lower():
+                            refs['sfx_prompt'].value = f'{current}, {t}' if current else t
+                    
+                    btn = ui.button(tag, on_click=add_style).props('flat dense size=sm').classes('text-zinc-400')
+                    btn.tooltip(desc)
+
+            # Variations selector
+            ui.label('VARIATIONS').classes('neovak-section-header mt-4')
+            with ui.row().classes('gap-2 items-center'):
+                for n in [1, 2, 3, 4]:
+                    def set_var(v=n):
+                        state['variations'] = v
+                    ui.button(
+                        str(n),
+                        on_click=set_var
+                    ).props(f'dense {"color=primary" if n == 1 else "color=dark"}').classes('w-10')
+                ui.label('Generate multiple variations at once').classes('text-zinc-500 text-xs ml-2')
+
+        # Generate button
+        refs['sfx_gen_btn'] = ui.button(
+            '🔊 Generate Sound Effect',
+            on_click=lambda: do_generate_sfx()
+        ).classes('w-full neovak-btn-primary')
+        
+        if not sfx_status['available']:
+            refs['sfx_gen_btn'].disable()
+
+        # Progress and status
+        with ui.column().classes('w-full gap-2'):
+            refs['sfx_progress'] = ui.linear_progress(value=0, show_value=False).classes('w-full neovak-progress')
+            refs['sfx_progress'].set_visibility(False)
+            refs['sfx_status'] = ui.label('').classes('text-zinc-400 text-sm')
+
+        # Output audio players (can show multiple variations)
+        refs['sfx_outputs'] = ui.column().classes('w-full gap-3')
+
+    async def do_generate_sfx():
+        prompt = refs['sfx_prompt'].value
+        if not prompt:
+            ui.notify('Describe the sound you want', type='warning')
+            return
+
+        refs['sfx_gen_btn'].disable()
+        refs['sfx_progress'].set_visibility(True)
+        refs['sfx_status'].set_text('Generating sound effect...')
+        refs['sfx_outputs'].clear()
+
+        def progress_cb(pct, msg):
+            refs['sfx_progress'].set_value(pct / 100)
+            refs['sfx_status'].set_text(msg)
+
+        try:
+            output_paths, status = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: generate_sfx(
+                    prompt=prompt,
+                    duration=state['duration'],
+                    num_variations=state['variations'],
+                    progress_callback=progress_cb,
+                )
+            )
+
+            if output_paths:
+                with refs['sfx_outputs']:
+                    for i, path in enumerate(output_paths):
+                        with ui.card().classes('w-full neovak-card p-3'):
+                            with ui.row().classes('items-center gap-3'):
+                                ui.label(f'Variation {i+1}').classes('text-amber-400 text-sm font-medium')
+                                ui.audio(path).classes('flex-1')
+                                # Download button
+                                ui.button(
+                                    icon='download',
+                                    on_click=lambda p=path: ui.download(p)
+                                ).props('flat dense').classes('text-zinc-400')
+                
+                refs['sfx_status'].set_text(f'✓ Generated {len(output_paths)} sound effect(s)!')
+                ui.notify('Sound effects generated!', type='positive')
+            else:
+                refs['sfx_status'].set_text(f'✗ {status}')
+                ui.notify(status, type='negative')
+        
+        except Exception as e:
+            refs['sfx_status'].set_text(f'✗ Error: {str(e)}')
+            ui.notify(str(e), type='negative')
+        
+        finally:
+            refs['sfx_gen_btn'].enable()
+            refs['sfx_progress'].set_visibility(False)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN APP
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1704,6 +2340,7 @@ def main_page():
                 image_tab = ui.tab('Image', icon='image')
                 video_tab = ui.tab('Video', icon='movie')
                 voice_tab = ui.tab('Voice', icon='mic')
+                sfx_tab = ui.tab('SFX', icon='graphic_eq')
                 music_tab = ui.tab('Music', icon='music_note')
 
             with ui.tab_panels(tabs, value=image_tab).classes('w-full flex-1'):
@@ -1713,6 +2350,8 @@ def main_page():
                     video_generation_panel()
                 with ui.tab_panel(voice_tab):
                     voice_generation_panel()
+                with ui.tab_panel(sfx_tab):
+                    sfx_generation_panel()
                 with ui.tab_panel(music_tab):
                     music_generation_panel()
 

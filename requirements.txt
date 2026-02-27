@@ -1,4 +1,4 @@
-# Forge - Local AI Creative Suite
+# NeoVak - Local AI Creative Suite
 # Python 3.10+ required
 
 # Core UI

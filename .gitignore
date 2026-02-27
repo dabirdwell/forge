@@ -58,7 +58,7 @@ voices/*.mp3
 !voices/.gitkeep
 
 # Config (may contain local paths)
-forge_config.json
+neovak_config.json
 config.local.json
 
 # Logs

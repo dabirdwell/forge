@@ -1,4 +1,4 @@
-# Build and release Forge.app when a version tag is pushed
+# Build and release NeoVak.app when a version tag is pushed
 # Usage: git tag v1.2.0 && git push origin v1.2.0
 
 name: Build and Release
@@ -36,7 +36,7 @@ jobs:
       - name: Build with PyInstaller (self-contained)
         run: |
           export VERSION=${{ steps.version.outputs.VERSION }}
-          pyinstaller Forge.spec -y
+          pyinstaller NeoVak.spec -y
 
       - name: Create DMG
         run: |
@@ -47,7 +47,7 @@ jobs:
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Forge-macOS
+          name: NeoVak-macOS
           path: dist/*.dmg
 
   release:
@@ -59,7 +59,7 @@ jobs:
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: Forge-macOS
+          name: NeoVak-macOS
           path: dist/
 
       - name: Get version from tag
@@ -69,24 +69,24 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          name: Forge v${{ steps.version.outputs.VERSION }}
+          name: NeoVak v${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: false
           files: |
             dist/*.dmg
           body: |
-            ## 🔥 Forge v${{ steps.version.outputs.VERSION }}
+            ## 💡 NeoVak v${{ steps.version.outputs.VERSION }}
 
             **Local AI Creative Suite for Mac** — No terminal needed.
 
             ### Download
 
-            - **macOS**: [Forge.dmg](https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/Forge-${{ steps.version.outputs.VERSION }}-macOS.dmg) (Apple Silicon recommended)
+            - **macOS**: [NeoVak.dmg](https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/NeoVak-${{ steps.version.outputs.VERSION }}-macOS.dmg) (Apple Silicon recommended)
 
             ### Installation
 
             1. Download the DMG
-            2. Drag Forge to Applications
+            2. Drag NeoVak to Applications
             3. Double-click to run
 
             ### Requirements
@@ -95,7 +95,7 @@ jobs:
             - [ComfyUI](https://github.com/comfyanonymous/ComfyUI) for AI backends
             - At least one AI model
 
-            Forge will guide you through setup on first run.
+            NeoVak will guide you through setup on first run.
 
             ### What's New
 
