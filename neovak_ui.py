@@ -1204,44 +1204,46 @@ def welcome_no_backend():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def app_header():
-    """Compact header with live status indicator."""
+    """Header with Lumina branding and whisper dot status indicators."""
     with ui.row().classes('w-full max-w-5xl mx-auto justify-between items-center py-3 px-2'):
         with ui.row().classes('items-center gap-3'):
-            ui.label('🔥').classes('text-2xl')
             with ui.column().classes('gap-0'):
-                ui.label('NeoVak').classes('text-lg font-bold text-white leading-tight')
-                available = SYSTEM.get_available_memory_gb()
-                pressure = SYSTEM.get_memory_pressure()
-                pressure_colors = {"low": "text-green-400", "medium": "text-yellow-400", "high": "text-orange-400", "critical": "text-red-400"}
-                mem_label = ui.label(f'{SYSTEM.chip} • {available:.0f}GB free').classes(f'text-xs {pressure_colors.get(pressure, "text-zinc-500")}')
+                ui.label('NeoVak').classes('text-xl font-bold leading-tight').style('color: var(--text-primary); letter-spacing: 0.02em;')
+                ui.label('Create images, video, voice, and music with AI \u2014 privately, on your Mac.').classes('text-xs').style('color: var(--text-muted); font-style: italic;')
 
-                def update_memory_display():
-                    avail = SYSTEM.get_available_memory_gb()
-                    press = SYSTEM.get_memory_pressure()
-                    mem_label.set_text(f'{SYSTEM.chip} • {avail:.0f}GB free')
-                    mem_label.classes(remove='text-green-400 text-yellow-400 text-orange-400 text-red-400 text-zinc-500')
-                    mem_label.classes(add=pressure_colors.get(press, "text-zinc-500"))
+        with ui.row().classes('items-center gap-3'):
+            # Whisper dot status indicators
+            header_refs = {}
 
-                ui.timer(10.0, update_memory_display)
+            with ui.row().classes('items-center gap-1'):
+                header_refs['comfyui_dot'] = ui.element('div').classes('neovak-whisper-dot cold')
+                ui.label('ComfyUI').classes('text-xs').style('color: var(--text-muted);')
 
-        with ui.row().classes('items-center gap-2'):
-            status_icon = ui.icon('circle', color='gray').classes('text-xs')
-            status_label = ui.label('Checking...').classes('text-sm text-zinc-400')
+            with ui.row().classes('items-center gap-1'):
+                header_refs['acestep_dot'] = ui.element('div').classes('neovak-whisper-dot cold')
+                ui.label('ACE-Step').classes('text-xs').style('color: var(--text-muted);')
 
-            async def update_status():
-                backend_ok, msg = check_backend()
+            available = SYSTEM.get_available_memory_gb()
+            mem_label = ui.label(f'{available:.0f}GB free').classes('text-xs').style('color: var(--text-muted);')
+
+            async def update_header_status():
+                backend_ok, _ = check_backend()
                 if backend_ok:
-                    status_icon._props['color'] = 'green'
-                    status_label.set_text('Ready')
-                    status_label.classes(remove='text-zinc-400 text-red-400', add='text-green-400')
+                    header_refs['comfyui_dot'].classes(remove='cold')
                 else:
-                    status_icon._props['color'] = 'red'
-                    status_label.set_text('Offline')
-                    status_label.classes(remove='text-zinc-400 text-green-400', add='text-red-400')
-                status_icon.update()
+                    header_refs['comfyui_dot'].classes(add='cold')
 
-            ui.timer(0.1, update_status, once=True)
-            ui.timer(10.0, update_status)
+                ace_ok, _ = await asyncio.get_event_loop().run_in_executor(None, check_acestep_backend)
+                if ace_ok:
+                    header_refs['acestep_dot'].classes(remove='cold')
+                else:
+                    header_refs['acestep_dot'].classes(add='cold')
+
+                avail = SYSTEM.get_available_memory_gb()
+                mem_label.set_text(f'{avail:.0f}GB free')
+
+            ui.timer(0.1, update_header_status, once=True)
+            ui.timer(15.0, update_header_status)
 
 def update_history_strip(refs, state):
     """Update the horizontal history strip with recent images."""
@@ -2266,10 +2268,10 @@ def voice_generation_panel():
 
             ui.label('EXPRESSION TAGS').classes('neovak-section-header mt-4')
             with ui.row().classes('gap-2 flex-wrap'):
-                for tag in VOICE_EXPRESSION_TAGS:
-                    def add_tag(t=tag):
-                        refs['text'].value = (refs['text'].value or '') + f' [{t}]'
-                    ui.button(f'[{tag}]', on_click=add_tag).props('flat dense size=sm').classes('text-zinc-400')
+                for tag_text, tag_desc in VOICE_EXPRESSION_TAGS:
+                    def add_tag(t=tag_text):
+                        refs['text'].value = (refs['text'].value or '') + f' {t}'
+                    ui.button(tag_text, on_click=add_tag).props('flat dense size=sm').classes('text-zinc-400').tooltip(tag_desc)
 
             # Expression level (emotion slider)
             with ui.column().classes('gap-1 mt-4'):
@@ -3193,6 +3195,63 @@ def main_page():
                     sfx_generation_panel()
                 with ui.tab_panel(music_tab):
                     music_generation_panel()
+
+        # ── System Status Bar ──
+        with ui.element('div').classes('neovak-status-bar w-full'):
+            status_refs = {}
+
+            with ui.element('div').classes('neovak-status-bar-item'):
+                status_refs['comfyui_dot'] = ui.element('div').classes('neovak-whisper-dot cold')
+                status_refs['comfyui_label'] = ui.label('ComfyUI: Checking...')
+
+            ui.element('div').classes('neovak-status-bar-separator')
+
+            with ui.element('div').classes('neovak-status-bar-item'):
+                status_refs['acestep_dot'] = ui.element('div').classes('neovak-whisper-dot cold')
+                status_refs['acestep_label'] = ui.label('ACE-Step: Checking...')
+
+            ui.element('div').classes('neovak-status-bar-separator')
+
+            with ui.element('div').classes('neovak-status-bar-item'):
+                status_refs['voice_dot'] = ui.element('div').classes('neovak-whisper-dot cold')
+                status_refs['voice_label'] = ui.label('Voice: Checking...')
+
+            ui.element('div').classes('neovak-status-bar-separator')
+
+            status_refs['ram_label'] = ui.label('')
+
+            async def update_status_bar():
+                backend_ok, _ = check_backend()
+                if backend_ok:
+                    status_refs['comfyui_dot'].classes(remove='cold')
+                    status_refs['comfyui_label'].set_text('ComfyUI: Connected')
+                else:
+                    status_refs['comfyui_dot'].classes(add='cold')
+                    status_refs['comfyui_label'].set_text('ComfyUI: Offline')
+
+                ace_ok, _ = await asyncio.get_event_loop().run_in_executor(None, check_acestep_backend)
+                if ace_ok:
+                    status_refs['acestep_dot'].classes(remove='cold')
+                    status_refs['acestep_label'].set_text('ACE-Step: Connected')
+                else:
+                    status_refs['acestep_dot'].classes(add='cold')
+                    status_refs['acestep_label'].set_text('ACE-Step: Offline')
+
+                voice_status = get_voice_model_status()
+                if voice_status.get('loaded'):
+                    status_refs['voice_dot'].classes(remove='cold')
+                    status_refs['voice_label'].set_text('Voice: Ready')
+                else:
+                    status_refs['voice_dot'].classes(add='cold')
+                    status_refs['voice_label'].set_text('Voice: Ready')
+
+                avail = SYSTEM.get_available_memory_gb()
+                total = SYSTEM.ram_gb
+                used = total - avail
+                status_refs['ram_label'].set_text(f'RAM: {used:.0f}/{total} GB')
+
+            ui.timer(0.1, update_status_bar, once=True)
+            ui.timer(15.0, update_status_bar)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
