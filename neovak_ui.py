@@ -24,6 +24,8 @@ from neovak_backend import (
     # Music generation (ACE-Step 1.5)
     generate_music, check_acestep_backend, MUSIC_DURATION_PRESETS, MUSIC_STYLE_TAGS,
     ACESTEP_URL, ACESTEP_DIR,
+    SONG_STRUCTURE_TEMPLATES, MOOD_GRID_LABELS, mood_to_tags,
+    estimate_duration_from_lyrics, mix_audio,
     # Sound effects generation
     generate_sfx, get_sfx_model_status, load_sfx_model, unload_sfx_model,
     SFX_DURATION_PRESETS, SFX_CATEGORIES, SFX_STYLE_TAGS,
@@ -38,7 +40,12 @@ from neovak_backend import (
     generate_with_controlnet, discover_controlnet_models,
     CONTROLNET_PREPROCESSORS, CONTROLNET_MODELS,
 )
-from acestep_client import format_input as acestep_format_input
+from acestep_client import (
+    format_input as acestep_format_input,
+    get_random_sample, generate_music_batch, get_model_inventory,
+    embed_album_art, get_lora_status, load_lora, unload_lora,
+    set_lora_scale, toggle_lora,
+)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -2041,7 +2048,13 @@ def music_generation_panel():
         'guidance_scale': 15.0,
         'guidance_scale_text': 0.0,
         'guidance_scale_lyric': 0.0,
+        'lm_model': '',
+        'mode': 'create',
         'history': [],
+        'last_output_path': None,
+        'audio_upload_path': None,
+        'repaint_start': 0.0,
+        'repaint_end': 0.0,
     }
     refs = {}
 
@@ -2070,6 +2083,63 @@ def music_generation_panel():
                 refs['start_btn'].set_visibility(True)
 
         ui.timer(0.1, refresh_status, once=True)
+
+        # ── Mode toggle: Create / Cover / Repaint ──
+        with ui.card().classes('w-full neovak-card p-4'):
+            ui.label('MODE').classes('neovak-section-header')
+            with ui.row().classes('gap-2'):
+                refs['mode_btns'] = []
+                for mode_id, mode_label in [('create', 'Create'), ('cover', 'Cover'), ('repaint', 'Repaint')]:
+                    def set_mode(m=mode_id, idx=len(refs.get('mode_btns', []))):
+                        state['mode'] = m
+                        for j, b in enumerate(refs['mode_btns']):
+                            b.props('color=primary' if j == idx else 'color=dark')
+                        refs['audio_upload_card'].set_visibility(m in ('cover', 'repaint'))
+                        refs['repaint_range_row'].set_visibility(m == 'repaint')
+                    btn = ui.button(mode_label, on_click=set_mode).props(
+                        f'dense no-caps {"color=primary" if mode_id == "create" else "color=dark"}'
+                    )
+                    refs['mode_btns'].append(btn)
+
+        # ── Audio upload for Cover / Repaint ──
+        with ui.card().classes('w-full neovak-card p-4') as refs['audio_upload_card']:
+            ui.label('SOURCE AUDIO').classes('neovak-section-header')
+            ui.label('Upload the audio file to cover or repaint').classes('text-zinc-500 text-xs')
+
+            async def handle_audio_upload(e):
+                upload_dir = OUTPUT_DIR / "uploads"
+                upload_dir.mkdir(exist_ok=True)
+                dest = upload_dir / e.name
+                with open(dest, 'wb') as f:
+                    f.write(e.content.read())
+                state['audio_upload_path'] = str(dest)
+                ui.notify(f'Uploaded: {e.name}', type='positive')
+
+            ui.upload(on_upload=handle_audio_upload, auto_upload=True).props(
+                'accept=".mp3,.wav,.flac,.ogg,.m4a" flat bordered'
+            ).classes('w-full')
+
+            with ui.row().classes('gap-4 mt-2') as refs['repaint_range_row']:
+                rp_start = ui.number('Repaint start (s)', value=0.0, min=0, step=0.5).classes('w-36')
+                rp_start.on('update:model-value', lambda e: state.update(repaint_start=float(e.args)))
+                rp_end = ui.number('Repaint end (s)', value=0.0, min=0, step=0.5).classes('w-36')
+                rp_end.on('update:model-value', lambda e: state.update(repaint_end=float(e.args)))
+                ui.label('0 = end of track').classes('text-zinc-500 text-xs self-center')
+
+        refs['audio_upload_card'].set_visibility(False)
+        refs['repaint_range_row'].set_visibility(False)
+
+        # ── Mood Compass (3x3 grid) ──
+        with ui.card().classes('w-full neovak-card p-4'):
+            ui.label('MOOD COMPASS').classes('neovak-section-header')
+            ui.label('Click a mood to fill style tags').classes('text-zinc-500 text-xs mb-2')
+            with ui.grid(columns=3).classes('gap-1 w-full'):
+                for label, energy, valence in MOOD_GRID_LABELS:
+                    def set_mood(e=energy, v=valence, lbl=label):
+                        tags = mood_to_tags(e, v)
+                        refs['caption'].value = tags
+                        ui.notify(f'{lbl}: {tags}', type='info')
+                    ui.button(label, on_click=set_mood).props('dense no-caps color=dark').classes('w-full')
 
         # Main input card
         with ui.card().classes('w-full neovak-card p-6'):
@@ -2101,6 +2171,42 @@ def music_generation_panel():
                         refs['lyrics'].value = cur + m + '\n'
                     ui.button(marker, on_click=insert_marker).props('flat dense size=sm').classes('text-zinc-400')
 
+            # Song structure templates
+            ui.label('TEMPLATES').classes('neovak-section-header mt-3')
+            with ui.row().classes('gap-1 flex-wrap'):
+                for tpl_name, tpl_text in SONG_STRUCTURE_TEMPLATES.items():
+                    def apply_template(t=tpl_text, n=tpl_name):
+                        refs['lyrics'].value = t
+                        ui.notify(f'Loaded: {n}', type='info')
+                    ui.button(tpl_name, on_click=apply_template).props('flat dense size=sm no-caps').classes('text-zinc-400')
+
+            # Duration estimate from lyrics
+            refs['duration_estimate'] = ui.label('').classes('text-zinc-500 text-xs mt-1')
+
+            def update_duration_estimate():
+                lyrics_val = refs['lyrics'].value or ''
+                if lyrics_val.strip():
+                    est = estimate_duration_from_lyrics(lyrics_val)
+                    mins, secs = divmod(est, 60)
+                    refs['duration_estimate'].set_text(f'Estimated: ~{mins}:{secs:02d}')
+
+                    def use_estimate():
+                        state['duration'] = est
+                        for j, btn in enumerate(refs['duration_btns']):
+                            btn.props('color=dark')
+                        ui.notify(f'Duration set to {est}s', type='info')
+
+                    refs['use_estimate_link'].on('click', use_estimate)
+                    refs['use_estimate_link'].set_visibility(True)
+                else:
+                    refs['duration_estimate'].set_text('')
+                    refs['use_estimate_link'].set_visibility(False)
+
+            refs['lyrics'].on('blur', update_duration_estimate)
+            refs['use_estimate_link'] = ui.link('Use estimate', '').props('flat').classes('text-amber-400 text-xs')
+            refs['use_estimate_link'].set_visibility(False)
+
+            # Expand with AI + Surprise Me row
             async def do_expand():
                 caption = refs['caption'].value
                 if not caption:
@@ -2120,7 +2226,36 @@ def music_generation_panel():
                     ui.notify('Expanded!', type='positive')
                 refs['expand_btn'].enable()
 
-            refs['expand_btn'] = ui.button('Expand with AI', on_click=do_expand).props('flat dense no-caps').classes('text-amber-400 mt-1')
+            async def do_surprise():
+                refs['surprise_btn'].disable()
+                ui.notify('Rolling the dice...', type='info')
+                try:
+                    result = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: get_random_sample(ACESTEP_URL)
+                    )
+                    desc = result.get('description', result.get('caption', ''))
+                    if desc:
+                        refs['caption'].value = desc
+                    lyrics_val = result.get('lyrics', '')
+                    if lyrics_val:
+                        refs['lyrics'].value = lyrics_val
+                    dur = result.get('duration')
+                    if dur:
+                        try:
+                            state['duration'] = int(float(dur))
+                        except (ValueError, TypeError):
+                            pass
+                    lang = result.get('vocal_language', '')
+                    instrumental = result.get('instrumental', False)
+                    hint = 'instrumental' if instrumental else f'vocals ({lang})' if lang else ''
+                    ui.notify(f'Got it! {hint}' if hint else 'Got a random sample!', type='positive')
+                except Exception as e:
+                    ui.notify(f'Surprise failed: {e}', type='negative')
+                refs['surprise_btn'].enable()
+
+            with ui.row().classes('gap-2 mt-2'):
+                refs['expand_btn'] = ui.button('Expand with AI', on_click=do_expand).props('flat dense no-caps').classes('text-amber-400')
+                refs['surprise_btn'] = ui.button('Surprise Me', on_click=do_surprise).props('flat dense no-caps').classes('text-amber-300')
 
             ui.label('DURATION').classes('neovak-section-header mt-4')
             refs['duration_btns'] = []
@@ -2143,6 +2278,7 @@ def music_generation_panel():
                     with ui.row().classes('items-center gap-4'):
                         seed_input = ui.number('Seed', value=-1, min=-1, step=1).classes('w-32')
                         seed_input.on('update:model-value', lambda e: state.update(seed=int(e.args)))
+                        refs['seed_input'] = seed_input
                         thinking_switch = ui.switch('Thinking (LM planner)', value=True)
                         thinking_switch.on('update:model-value', lambda e: state.update(thinking=e.args))
                     with ui.row().classes('items-center gap-4'):
@@ -2156,14 +2292,73 @@ def music_generation_panel():
                         gl_input = ui.number('Guidance (lyric)', value=0.0, min=0, max=10, step=0.5).classes('w-32')
                         gl_input.on('update:model-value', lambda e: state.update(guidance_scale_lyric=float(e.args)))
 
-        # Generate button
-        refs['gen_btn'] = ui.button('Generate Music', on_click=lambda: do_generate()).classes('w-full neovak-btn-primary')
+                    # LM Model Switcher (Feature 5)
+                    ui.label('LM QUALITY').classes('neovak-section-header mt-2')
+                    refs['lm_select'] = ui.select(
+                        options={'': 'Default (server)', 'acestep-5Hz-lm-1.7B': 'Standard (1.7B)', 'acestep-5Hz-lm-4B': 'Premium (4B)'},
+                        value='',
+                        on_change=lambda e: state.update(lm_model=e.value),
+                    ).classes('w-full').props('outlined dense')
+                    ui.label('Larger models produce better song structures but take longer').classes('text-zinc-500 text-xs')
+
+                    # LoRA Management (Feature 11)
+                    ui.label('LORA').classes('neovak-section-header mt-3')
+                    refs['lora_path'] = ui.input('LoRA path (.safetensors)').classes('w-full').props('outlined dense')
+                    refs['lora_status'] = ui.label('No LoRA loaded').classes('text-zinc-500 text-xs')
+
+                    with ui.row().classes('gap-2 items-center'):
+                        async def do_load_lora():
+                            path = refs['lora_path'].value
+                            if not path:
+                                ui.notify('Enter a LoRA path', type='warning')
+                                return
+                            ok, msg = await asyncio.get_event_loop().run_in_executor(
+                                None, lambda: load_lora(ACESTEP_URL, path)
+                            )
+                            if ok:
+                                refs['lora_status'].set_text(f'Loaded: {path.split("/")[-1]}')
+                                ui.notify('LoRA loaded', type='positive')
+                            else:
+                                ui.notify(f'Failed: {msg}', type='negative')
+
+                        async def do_unload_lora():
+                            ok, msg = await asyncio.get_event_loop().run_in_executor(
+                                None, lambda: unload_lora(ACESTEP_URL)
+                            )
+                            if ok:
+                                refs['lora_status'].set_text('No LoRA loaded')
+                                ui.notify('LoRA unloaded', type='positive')
+                            else:
+                                ui.notify(f'Failed: {msg}', type='negative')
+
+                        ui.button('Load', on_click=do_load_lora).props('dense no-caps color=dark')
+                        ui.button('Unload', on_click=do_unload_lora).props('dense no-caps color=dark')
+                        refs['lora_toggle'] = ui.switch('Enabled', value=False)
+                        refs['lora_toggle'].on('update:model-value',
+                            lambda e: asyncio.ensure_future(asyncio.get_event_loop().run_in_executor(
+                                None, lambda: toggle_lora(ACESTEP_URL, e.args))))
+
+                    refs['lora_scale'] = ui.slider(min=0.0, max=1.0, step=0.05, value=1.0).classes('w-full')
+                    ui.label('LoRA Scale').classes('text-zinc-500 text-xs')
+                    refs['lora_scale'].on('update:model-value',
+                        lambda e: asyncio.ensure_future(asyncio.get_event_loop().run_in_executor(
+                            None, lambda: set_lora_scale(ACESTEP_URL, float(e.args)))))
+
+        # Generate + Lucky 4 buttons
+        with ui.row().classes('w-full gap-2'):
+            refs['gen_btn'] = ui.button('Generate Music', on_click=lambda: do_generate()).classes('flex-1 neovak-btn-primary')
+            refs['lucky4_btn'] = ui.button('Lucky 4', on_click=lambda: do_lucky4()).props('no-caps color=amber').classes('').tooltip('Generate 4 variations')
 
         # Progress
         with ui.column().classes('w-full gap-2'):
             refs['progress'] = ui.linear_progress(value=0, show_value=False).classes('w-full neovak-progress')
             refs['progress'].set_visibility(False)
             refs['status'] = ui.label('').classes('text-zinc-400 text-sm')
+
+        # Seed Explorer grid (Feature 4)
+        with ui.card().classes('w-full neovak-card p-4 hidden') as refs['batch_card']:
+            ui.label('SEED EXPLORER').classes('neovak-section-header')
+            refs['batch_grid'] = ui.grid(columns=2).classes('gap-2 w-full')
 
         # Output player
         with ui.card().classes('w-full neovak-card p-4 hidden') as refs['output_card']:
@@ -2173,15 +2368,147 @@ def music_generation_panel():
                 refs['seed_label'] = ui.label('').classes('text-zinc-500 text-xs')
                 refs['download_link'] = ui.link('Download', '').classes('text-amber-400 text-sm')
 
+            # Album art upload (Feature 10)
+            with ui.row().classes('gap-2 mt-2 items-center'):
+                async def handle_art_upload(e):
+                    if not state.get('last_output_path'):
+                        ui.notify('Generate music first', type='warning')
+                        return
+                    art_dir = OUTPUT_DIR / "uploads"
+                    art_dir.mkdir(exist_ok=True)
+                    art_path = art_dir / e.name
+                    with open(art_path, 'wb') as f:
+                        f.write(e.content.read())
+                    ok = embed_album_art(state['last_output_path'], str(art_path))
+                    if ok:
+                        ui.notify('Album art embedded!', type='positive')
+                    else:
+                        ui.notify('Failed to embed art (mutagen needed)', type='negative')
+
+                ui.upload(on_upload=handle_art_upload, auto_upload=True).props(
+                    'accept=".png,.jpg,.jpeg" label="Upload Cover Art" flat bordered dense'
+                ).classes('max-w-xs')
+
+        # Voice + Music Mixer (Feature 9)
+        with ui.card().classes('w-full neovak-card p-4 hidden') as refs['mixer_card']:
+            ui.label('VOICE + MUSIC MIXER').classes('neovak-section-header')
+            refs['mixer_voice_path'] = None
+
+            async def handle_voice_upload(e):
+                upload_dir = OUTPUT_DIR / "uploads"
+                upload_dir.mkdir(exist_ok=True)
+                dest = upload_dir / e.name
+                with open(dest, 'wb') as f:
+                    f.write(e.content.read())
+                refs['mixer_voice_path'] = str(dest)
+                ui.notify(f'Voice loaded: {e.name}', type='positive')
+
+            ui.upload(on_upload=handle_voice_upload, auto_upload=True).props(
+                'accept=".mp3,.wav,.flac,.ogg,.m4a" label="Upload Voice Track" flat bordered'
+            ).classes('w-full')
+
+            with ui.row().classes('gap-4 mt-2 items-center'):
+                refs['music_vol'] = ui.slider(min=0, max=100, step=5, value=30).classes('flex-1')
+                ui.label('Music %').classes('text-zinc-500 text-xs')
+                refs['voice_vol'] = ui.slider(min=0, max=100, step=5, value=100).classes('flex-1')
+                ui.label('Voice %').classes('text-zinc-500 text-xs')
+
+            async def do_mix():
+                if not state.get('last_output_path'):
+                    ui.notify('Generate music first', type='warning')
+                    return
+                if not refs.get('mixer_voice_path'):
+                    ui.notify('Upload a voice track', type='warning')
+                    return
+                ui.notify('Mixing...', type='info')
+                music_vol = refs['music_vol'].value / 100.0
+                voice_vol = refs['voice_vol'].value / 100.0
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: mix_audio(
+                        state['last_output_path'], refs['mixer_voice_path'],
+                        music_volume=music_vol, voice_volume=voice_vol
+                    )
+                )
+                if result:
+                    refs['audio_player'].set_source(app.add_media_file(local_file=result))
+                    refs['output_card'].classes(remove='hidden')
+                    ui.notify('Mixed!', type='positive')
+                else:
+                    ui.notify('Mix failed (is ffmpeg installed?)', type='negative')
+
+            ui.button('Mix', on_click=do_mix).props('no-caps color=amber').classes('w-full mt-2')
+
         # History strip
         with ui.column().classes('w-full'):
             ui.label('HISTORY').classes('neovak-section-header')
             refs['history_row'] = ui.row().classes('gap-2 flex-wrap')
 
+    def _show_output(output_path, status_msg, caption):
+        """Helper to display a generated track."""
+        state['last_output_path'] = output_path
+        refs['audio_player'].set_source(app.add_media_file(local_file=output_path))
+        refs['output_card'].classes(remove='hidden')
+        refs['mixer_card'].classes(remove='hidden')
+        refs['output_info'].set_text(status_msg.split(' | ')[0] if ' | ' in status_msg else status_msg)
+        seed_part = [p for p in status_msg.split(' | ') if 'seed' in p]
+        refs['seed_label'].set_text(seed_part[0] if seed_part else '')
+        refs['download_link'].props(f'href="{output_path}"')
+
+        entry = {
+            'path': output_path,
+            'caption': caption,
+            'duration': state['duration'],
+            'status': status_msg,
+        }
+        state['history'].append(entry)
+        with refs['history_row']:
+            idx = len(state['history']) - 1
+            def load_history(i=idx):
+                h = state['history'][i]
+                state['last_output_path'] = h['path']
+                refs['audio_player'].set_source(app.add_media_file(local_file=h['path']))
+                refs['output_card'].classes(remove='hidden')
+                refs['output_info'].set_text(h['status'].split(' | ')[0])
+            dur_label = f"{state['duration']}s"
+            ui.button(f'{dur_label}', on_click=load_history).props('dense no-caps color=dark').tooltip(caption[:60])
+
+    def _build_generate_kwargs():
+        """Build kwargs for generate_music from current UI state."""
+        caption = refs['caption'].value
+        mode = state['mode']
+        task_type = 'text2music'
+        audio_path = ''
+        if mode == 'cover':
+            task_type = 'cover'
+            audio_path = state.get('audio_upload_path', '') or ''
+        elif mode == 'repaint':
+            task_type = 'repaint'
+            audio_path = state.get('audio_upload_path', '') or ''
+        return dict(
+            prompt=caption,
+            lyrics=refs['lyrics'].value or '',
+            duration=state['duration'],
+            seed=state['seed'],
+            thinking=state['thinking'],
+            infer_step=state['infer_step'],
+            guidance_scale=state['guidance_scale'],
+            guidance_scale_text=state['guidance_scale_text'],
+            guidance_scale_lyric=state['guidance_scale_lyric'],
+            lm_model=state['lm_model'],
+            audio_path=audio_path,
+            repaint_start=state['repaint_start'],
+            repaint_end=state['repaint_end'],
+            task_type=task_type,
+        )
+
     async def do_generate():
         caption = refs['caption'].value
         if not caption:
             ui.notify('Enter style tags first', type='warning')
+            return
+        mode = state['mode']
+        if mode in ('cover', 'repaint') and not state.get('audio_upload_path'):
+            ui.notify('Upload source audio first', type='warning')
             return
 
         refs['gen_btn'].disable()
@@ -2190,50 +2517,15 @@ def music_generation_panel():
         refs['status'].set_text('Submitting to ACE-Step...')
 
         try:
+            kwargs = _build_generate_kwargs()
             output_path, status_msg = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: generate_music(
-                    prompt=caption,
-                    lyrics=refs['lyrics'].value or '',
-                    duration=state['duration'],
-                    seed=state['seed'],
-                    thinking=state['thinking'],
-                    infer_step=state['infer_step'],
-                    guidance_scale=state['guidance_scale'],
-                    guidance_scale_text=state['guidance_scale_text'],
-                    guidance_scale_lyric=state['guidance_scale_lyric'],
-                )
+                None, lambda: generate_music(**kwargs)
             )
 
             if output_path:
-                app.add_media_file(local_file=output_path)
-                refs['audio_player'].set_source(app.add_media_file(local_file=output_path))
-                refs['output_card'].classes(remove='hidden')
-                refs['output_info'].set_text(status_msg.split(' | ')[0] if ' | ' in status_msg else status_msg)
-                seed_part = [p for p in status_msg.split(' | ') if 'seed' in p]
-                refs['seed_label'].set_text(seed_part[0] if seed_part else '')
-                refs['download_link'].props(f'href="{output_path}"')
+                _show_output(output_path, status_msg, caption)
                 refs['status'].set_text('Done!')
                 ui.notify('Music generated!', type='positive')
-
-                # Add to history
-                entry = {
-                    'path': output_path,
-                    'caption': caption,
-                    'duration': state['duration'],
-                    'status': status_msg,
-                }
-                state['history'].append(entry)
-                with refs['history_row']:
-                    idx = len(state['history']) - 1
-                    def load_history(i=idx):
-                        h = state['history'][i]
-                        app.add_media_file(local_file=h['path'])
-                        refs['audio_player'].set_source(app.add_media_file(local_file=h['path']))
-                        refs['output_card'].classes(remove='hidden')
-                        refs['output_info'].set_text(h['status'].split(' | ')[0])
-                    dur_label = f"{state['duration']}s"
-                    ui.button(f'{dur_label}', on_click=load_history).props('dense no-caps color=dark').tooltip(caption[:60])
             else:
                 refs['status'].set_text(f'Failed: {status_msg}')
                 ui.notify(status_msg, type='negative')
@@ -2241,6 +2533,71 @@ def music_generation_panel():
             refs['status'].set_text(f'Error: {e}')
             ui.notify(str(e), type='negative')
         finally:
+            refs['gen_btn'].enable()
+            refs['progress'].set_visibility(False)
+
+    async def do_lucky4():
+        caption = refs['caption'].value
+        if not caption:
+            ui.notify('Enter style tags first', type='warning')
+            return
+
+        refs['lucky4_btn'].disable()
+        refs['gen_btn'].disable()
+        refs['progress'].set_visibility(True)
+        refs['progress'].set_value(0)
+        refs['status'].set_text('Generating 4 variations...')
+
+        try:
+            from acestep_client import generate_music_batch as _batch
+            results = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: _batch(
+                    url=ACESTEP_URL,
+                    caption=caption,
+                    lyrics=refs['lyrics'].value or '',
+                    duration=state['duration'],
+                    batch_size=4,
+                    thinking=state['thinking'],
+                    infer_step=state['infer_step'],
+                    guidance_scale=state['guidance_scale'],
+                    guidance_scale_text=state['guidance_scale_text'],
+                    guidance_scale_lyric=state['guidance_scale_lyric'],
+                    lm_model=state['lm_model'],
+                )
+            )
+
+            refs['batch_card'].classes(remove='hidden')
+            refs['batch_grid'].clear()
+
+            valid_count = sum(1 for r in results if r.get('path'))
+            if valid_count == 0:
+                refs['status'].set_text(f'Batch failed: {results[0].get("status", "unknown")}')
+                ui.notify('Batch generation failed', type='negative')
+            else:
+                with refs['batch_grid']:
+                    for r in results:
+                        if not r.get('path'):
+                            continue
+                        with ui.card().classes('neovak-card p-3'):
+                            ui.label(f'Seed: {r["seed"]}').classes('text-zinc-400 text-xs font-mono')
+                            ui.audio(app.add_media_file(local_file=r['path'])).classes('w-full')
+                            ui.label(r['status']).classes('text-zinc-500 text-xs')
+
+                            def use_this(path=r['path'], seed=r['seed'], st=r['status']):
+                                _show_output(path, st, caption)
+                                state['seed'] = int(seed) if seed else -1
+                                refs['seed_input'].value = state['seed']
+                                ui.notify(f'Using seed {seed}', type='positive')
+
+                            ui.button('Use This', on_click=use_this).props('dense no-caps color=amber').classes('w-full mt-1')
+
+                refs['status'].set_text(f'Done! {valid_count} variations')
+                ui.notify(f'{valid_count} variations ready', type='positive')
+        except Exception as e:
+            refs['status'].set_text(f'Error: {e}')
+            ui.notify(str(e), type='negative')
+        finally:
+            refs['lucky4_btn'].enable()
             refs['gen_btn'].enable()
             refs['progress'].set_visibility(False)
 

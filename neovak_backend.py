@@ -6,6 +6,7 @@ Framework-agnostic code for model discovery and ComfyUI integration.
 import os
 import json
 import time
+import shutil
 import subprocess
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -2578,6 +2579,87 @@ MUSIC_STYLE_TAGS = [
 ]
 
 
+# Song structure templates for lyrics
+SONG_STRUCTURE_TEMPLATES = {
+    "Pop Song": "[Verse 1]\n(Your verse here)\n\n[Chorus]\n(Your chorus here)\n\n[Verse 2]\n(Second verse)\n\n[Chorus]\n(Chorus repeat)\n\n[Bridge]\n(Bridge section)\n\n[Chorus]\n(Final chorus)",
+    "Ballad": "[Intro]\n(Gentle intro)\n\n[Verse 1]\n(Set the scene)\n\n[Verse 2]\n(Deepen the story)\n\n[Chorus]\n(Emotional peak)\n\n[Verse 3]\n(Resolution)\n\n[Chorus]\n(Final chorus)\n\n[Outro]\n(Fade out)",
+    "Lo-fi Loop": "[Loop]\n(Repeating phrase or melody)\n\n[Variation]\n(Slight change)\n\n[Loop]\n(Return to main phrase)",
+    "Epic Anthem": "[Intro]\n(Building atmosphere)\n\n[Verse 1]\n(Call to action)\n\n[Pre-Chorus]\n(Building tension)\n\n[Chorus]\n(Anthemic hook)\n\n[Verse 2]\n(Raise the stakes)\n\n[Pre-Chorus]\n(Building again)\n\n[Chorus]\n(Bigger this time)\n\n[Bridge]\n(Breakdown / spoken word)\n\n[Final Chorus]\n(Everything at once)\n\n[Outro]\n(Triumphant close)",
+    "Spoken Word": "[Intro]\n(Setting / ambient sound)\n\n[Part 1]\n(Opening thought)\n\n[Part 2]\n(Development)\n\n[Part 3]\n(Climax)\n\n[Outro]\n(Reflection)",
+    "Instrumental": "[Instrumental]",
+    "Hip-Hop": "[Intro]\n(Beat drop)\n\n[Verse 1]\n(16 bars)\n\n[Hook]\n(Catchy hook)\n\n[Verse 2]\n(16 bars)\n\n[Hook]\n(Hook repeat)\n\n[Bridge]\n(Switch up)\n\n[Verse 3]\n(Final verse)\n\n[Hook]\n(Outro hook)",
+}
+
+
+# Mood compass: (energy, valence) -> style tags
+MOOD_COMPASS = {
+    (0.0, 0.0): "dark ambient, drone, minimal, haunting",
+    (0.0, 0.5): "ambient, lo-fi, chill, mellow, soft",
+    (0.0, 1.0): "peaceful, acoustic, warm, gentle, lullaby",
+    (0.5, 0.0): "melancholic, indie, minor key, introspective",
+    (0.5, 0.5): "indie pop, mid-tempo, thoughtful, breezy",
+    (0.5, 1.0): "folk, acoustic, uplifting, hopeful, warm",
+    (1.0, 0.0): "metal, aggressive, dark, intense, heavy",
+    (1.0, 0.5): "rock, energetic, driving, powerful",
+    (1.0, 1.0): "dance, euphoric, upbeat, festival, bright synths",
+}
+
+MOOD_GRID_LABELS = [
+    ("Peaceful", 0.0, 1.0), ("Hopeful", 0.5, 1.0), ("Euphoric", 1.0, 1.0),
+    ("Chill", 0.0, 0.5), ("Balanced", 0.5, 0.5), ("Energetic", 1.0, 0.5),
+    ("Haunting", 0.0, 0.0), ("Moody", 0.5, 0.0), ("Aggressive", 1.0, 0.0),
+]
+
+
+def mood_to_tags(energy: float, valence: float) -> str:
+    """Convert mood compass position to style tags using nearest neighbor."""
+    best_dist = float('inf')
+    best_tags = ""
+    for (e, v), tags in MOOD_COMPASS.items():
+        dist = (energy - e)**2 + (valence - v)**2
+        if dist < best_dist:
+            best_dist = dist
+            best_tags = tags
+    return best_tags
+
+
+def estimate_duration_from_lyrics(lyrics: str) -> int:
+    """Estimate song duration from lyrics content."""
+    if not lyrics.strip():
+        return 120
+    lines = [l.strip() for l in lyrics.split('\n') if l.strip()]
+    lyric_lines = [l for l in lines if not l.startswith('[')]
+    marker_lines = [l for l in lines if l.startswith('[')]
+    instrumental_markers = sum(1 for m in marker_lines
+        if any(x in m.lower() for x in ['intro', 'outro', 'instrumental', 'solo', 'break']))
+    estimated = (len(lyric_lines) * 3) + (instrumental_markers * 15) + 10
+    return max(15, min(600, estimated))
+
+
+def mix_audio(music_path: str, voice_path: str,
+              music_volume: float = 0.3,
+              voice_volume: float = 1.0,
+              output_path: str = None) -> Optional[str]:
+    """Mix a music track with a voice track using ffmpeg."""
+    if output_path is None:
+        ts = int(time.time())
+        output_path = str(OUTPUT_DIR / f"neovak_mix_{ts}.mp3")
+    ffmpeg_bin = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-i", music_path,
+        "-i", voice_path,
+        "-filter_complex",
+        f"[0:a]volume={music_volume}[music];[1:a]volume={voice_volume}[voice];[music][voice]amix=inputs=2:duration=longest",
+        "-ac", "2", "-ar", "48000",
+        output_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=60)
+    if result.returncode == 0 and Path(output_path).exists():
+        return output_path
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SOUND EFFECTS GENERATION (AudioGen / AudioLDM2)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2870,6 +2952,11 @@ def generate_music(
     guidance_scale: float = 15.0,
     guidance_scale_text: float = 0.0,
     guidance_scale_lyric: float = 0.0,
+    lm_model: str = "",
+    audio_path: str = "",
+    repaint_start: float = 0.0,
+    repaint_end: float = 0.0,
+    task_type: str = "text2music",
     progress_callback=None,
 ) -> tuple[Optional[str], str]:
     """Generate music using ACE-Step 1.5 backend."""
@@ -2885,6 +2972,11 @@ def generate_music(
         guidance_scale=guidance_scale,
         guidance_scale_text=guidance_scale_text,
         guidance_scale_lyric=guidance_scale_lyric,
+        lm_model=lm_model,
+        audio_path=audio_path,
+        repaint_start=repaint_start,
+        repaint_end=repaint_end,
+        task_type=task_type,
         progress_callback=progress_callback,
     )
 
