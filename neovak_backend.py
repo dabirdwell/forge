@@ -41,6 +41,11 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # ComfyUI backend URL
 COMFYUI_URL = _get_config('comfyui_url', 'COMFYUI_URL', "http://127.0.0.1:8188")
 
+# ACE-Step music backend URL
+ACESTEP_URL = _get_config('acestep_url', 'ACESTEP_URL', "http://127.0.0.1:8001")
+ACESTEP_DIR = Path(_get_config('acestep_dir', 'ACESTEP_DIR',
+    str(Path.home() / "ACE-Step-1.5")))
+
 # Model search paths
 _default_model_paths = [
     Path.home() / ".comfyui" / "models",
@@ -88,6 +93,8 @@ def get_current_config() -> dict:
     """Get current configuration as a dictionary."""
     return {
         "comfyui_url": COMFYUI_URL,
+        "acestep_url": ACESTEP_URL,
+        "acestep_dir": str(ACESTEP_DIR),
         "output_dir": str(OUTPUT_DIR),
         "model_paths": [str(p) for p in MODEL_SEARCH_PATHS],
     }
@@ -729,6 +736,11 @@ SPECIFIC_MODEL_INFO = {
         "family": "musicgen", "type": "music",
         "desc": "Generate background music from text. Good for video soundtracks."
     },
+    "acestep": {
+        "family": "acestep", "type": "music",
+        "desc": "ACE-Step 1.5. Commercial-grade music from text+lyrics. Under 4GB VRAM.",
+        "backend": "acestep",
+    },
     
     # ─────────────────────────────────────────────────────────────────────────
     # QWEN IMAGE MODELS
@@ -776,6 +788,7 @@ FAMILY_FALLBACKS = {
     "riffusion": {"type": "music", "desc": "Riffusion. Real-time music from spectrograms.", "backend": "comfyui"},
     "audioldm": {"type": "music", "desc": "AudioLDM. Text-to-audio, sound effects.", "backend": "comfyui"},
     "audioldm2": {"type": "music", "desc": "AudioLDM2. Improved quality, speech + music.", "backend": "comfyui"},
+    "acestep": {"type": "music", "desc": "ACE-Step 1.5. Full songs from text + lyrics, royalty-free.", "backend": "acestep"},
     # Unknown
     "unknown": {"type": "unknown", "desc": "Unrecognized model."},
 }
@@ -2541,26 +2554,27 @@ def poll_comfyui_output(prompt_id: str, output_type: str = "image", progress_cal
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MUSIC GENERATION (ComfyUI Backend)
+# MUSIC GENERATION (ACE-Step 1.5 Backend)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Music generation presets
 MUSIC_DURATION_PRESETS = [
-    ("Short", 5, "~5 seconds - Jingles, stingers"),
-    ("Medium", 15, "~15 seconds - Loops, transitions"),
-    ("Standard", 30, "~30 seconds - Background music"),
-    ("Long", 60, "~60 seconds - Full pieces"),
+    ("Short", 30, "~30 second clip"),
+    ("Medium", 120, "~2 minute track"),
+    ("Standard", 180, "~3 minute song"),
+    ("Long", 300, "~5 minute piece"),
+    ("Extended", 600, "~10 minute composition"),
 ]
 
 MUSIC_STYLE_TAGS = [
-    ("ambient", "Atmospheric, floating"),
-    ("electronic", "Synths, beats"),
-    ("acoustic", "Natural instruments"),
-    ("orchestral", "Cinematic, epic"),
-    ("lofi", "Chill, relaxed"),
-    ("rock", "Guitars, drums"),
-    ("jazz", "Smooth, improvised"),
-    ("classical", "Traditional, composed"),
+    "pop", "rock", "jazz", "classical", "electronic", "hip-hop", "r&b",
+    "country", "folk", "blues", "metal", "punk", "indie", "ambient",
+    "lo-fi", "synthwave", "disco", "reggae", "latin", "k-pop",
+    "acoustic guitar", "electric guitar", "piano", "synth", "drums",
+    "bass", "strings", "brass", "woodwinds", "choir",
+    "upbeat", "melancholic", "energetic", "calm", "dark", "dreamy",
+    "aggressive", "romantic", "epic", "intimate", "playful",
+    "male vocals", "female vocals", "vocal harmony", "rap", "spoken word",
+    "no vocals", "instrumental",
 ]
 
 
@@ -2840,29 +2854,52 @@ def generate_sfx(
         return None, f"SFX generation error: {str(e)}"
 
 
+def check_acestep_backend() -> tuple[bool, str]:
+    """Check if ACE-Step API server is running."""
+    from acestep_client import check_acestep_backend as _check
+    return _check(ACESTEP_URL)
+
+
 def generate_music(
+    prompt: str,
+    lyrics: str = "",
+    duration: int = 120,
+    seed: int = -1,
+    thinking: bool = True,
+    infer_step: int = 30,
+    guidance_scale: float = 15.0,
+    guidance_scale_text: float = 0.0,
+    guidance_scale_lyric: float = 0.0,
+    progress_callback=None,
+) -> tuple[Optional[str], str]:
+    """Generate music using ACE-Step 1.5 backend."""
+    from acestep_client import generate_music as _generate
+    return _generate(
+        url=ACESTEP_URL,
+        caption=prompt,
+        lyrics=lyrics,
+        duration=duration,
+        seed=seed,
+        thinking=thinking,
+        infer_step=infer_step,
+        guidance_scale=guidance_scale,
+        guidance_scale_text=guidance_scale_text,
+        guidance_scale_lyric=guidance_scale_lyric,
+        progress_callback=progress_callback,
+    )
+
+
+def generate_music_comfyui(
     model: 'Model',
     prompt: str,
     duration: int = 30,
     melody_audio: Optional[str] = None,
     progress_callback=None
 ) -> tuple[Optional[str], str]:
-    """Generate music using a music model through ComfyUI.
-
-    Args:
-        model: The Model object for the music model to use
-        prompt: Text description of the music to generate
-        duration: Target duration in seconds
-        melody_audio: Optional path to audio file for melody conditioning
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (output_path or None, status_message)
-    """
+    """Generate music using a music model through ComfyUI (legacy fallback)."""
     if progress_callback:
         progress_callback(10, f"Loading {model.name}...")
 
-    # Check if ComfyUI backend is available
     backend_ok, backend_status = check_backend()
     if not backend_ok:
         return None, f"ComfyUI not running. Start it first to use {model.name}."
@@ -2870,7 +2907,6 @@ def generate_music(
     if progress_callback:
         progress_callback(20, "Preparing workflow...")
 
-    # Build ComfyUI workflow for music
     workflow = build_music_workflow(model, prompt, duration, melody_audio)
 
     if workflow is None:
@@ -2880,12 +2916,11 @@ def generate_music(
         if progress_callback:
             progress_callback(30, "Generating music...")
 
-        # Queue the workflow
         import requests
         response = requests.post(
             f"{COMFYUI_URL}/prompt",
             json={"prompt": workflow},
-            timeout=300  # Music can take a while
+            timeout=300
         )
         response.raise_for_status()
         result = response.json()
@@ -2894,7 +2929,6 @@ def generate_music(
         if not prompt_id:
             return None, "Failed to queue music workflow"
 
-        # Poll for completion (longer timeout for music)
         if progress_callback:
             progress_callback(50, "Processing audio...")
 

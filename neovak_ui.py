@@ -21,8 +21,9 @@ from neovak_backend import (
     # Voice generation
     generate_speech, get_voice_model_status, load_voice_models, unload_voice_models,
     get_voice_presets, resolve_voice_preset, VOICE_EXPRESSION_TAGS, VOICES_DIR,
-    # Music generation
-    generate_music, MUSIC_DURATION_PRESETS, MUSIC_STYLE_TAGS,
+    # Music generation (ACE-Step 1.5)
+    generate_music, check_acestep_backend, MUSIC_DURATION_PRESETS, MUSIC_STYLE_TAGS,
+    ACESTEP_URL, ACESTEP_DIR,
     # Sound effects generation
     generate_sfx, get_sfx_model_status, load_sfx_model, unload_sfx_model,
     SFX_DURATION_PRESETS, SFX_CATEGORIES, SFX_STYLE_TAGS,
@@ -37,6 +38,7 @@ from neovak_backend import (
     generate_with_controlnet, discover_controlnet_models,
     CONTROLNET_PREPROCESSORS, CONTROLNET_MODELS,
 )
+from acestep_client import format_input as acestep_format_input
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -2025,112 +2027,222 @@ def voice_generation_panel():
             refs['voice_progress'].set_visibility(False)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MUSIC GENERATION PANEL
+# MUSIC GENERATION PANEL (ACE-Step 1.5)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def music_generation_panel():
-    """Music generation panel."""
-    # Discover music models
-    all_models = discover_all_models()
-    music_models = all_models.get('music', [])
-    if not music_models:
-        # Fallback placeholder
-        music_models = [Model(name="MusicGen", path=Path("."), family="Audio", size_gb=0,
-                             tier_required="pro", media_type="music",
-                             description="Generate music from text descriptions")]
-    
-    state = {'duration': 15, 'style': None, 'model': music_models[0]}
+    """Music generation panel powered by ACE-Step 1.5."""
+
+    state = {
+        'duration': 120,
+        'seed': -1,
+        'thinking': True,
+        'infer_step': 30,
+        'guidance_scale': 15.0,
+        'guidance_scale_text': 0.0,
+        'guidance_scale_lyric': 0.0,
+        'history': [],
+    }
     refs = {}
 
     with ui.column().classes('w-full max-w-2xl mx-auto gap-6 py-6'):
-        ui.label('🎵 Music Generation').classes('neovak-title')
-        ui.label('Create music from text descriptions').classes('neovak-subtitle mb-4')
+        ui.label('Music Generation').classes('neovak-title')
+        ui.label('Create full songs from style tags + lyrics with ACE-Step 1.5').classes('neovak-subtitle mb-4')
 
+        # ACE-Step status bar
+        with ui.card().classes('w-full neovak-card p-4'):
+            with ui.row().classes('items-center gap-3 w-full'):
+                refs['status_icon'] = ui.icon('circle').classes('text-zinc-500')
+                refs['status_label'] = ui.label('Checking ACE-Step...').classes('text-zinc-400 text-sm flex-1')
+                refs['start_btn'] = ui.button('Start Server', on_click=lambda: ui.notify(
+                    f'Run: cd {ACESTEP_DIR} && ./start_api_server_macos.sh', type='info', timeout=8000
+                )).props('flat dense size=sm').classes('text-zinc-400')
+
+        async def refresh_status():
+            ok, msg = await asyncio.get_event_loop().run_in_executor(None, check_acestep_backend)
+            if ok:
+                refs['status_icon'].classes(remove='text-zinc-500 text-red-400', add='text-green-400')
+                refs['status_label'].set_text(msg)
+                refs['start_btn'].set_visibility(False)
+            else:
+                refs['status_icon'].classes(remove='text-zinc-500 text-green-400', add='text-red-400')
+                refs['status_label'].set_text(msg)
+                refs['start_btn'].set_visibility(True)
+
+        ui.timer(0.1, refresh_status, once=True)
+
+        # Main input card
         with ui.card().classes('w-full neovak-card p-6'):
-            # Model selection
-            if len(music_models) > 1:
-                ui.label('MODEL').classes('neovak-section-header mb-2')
-                with ui.row().classes('items-center gap-2 mb-4'):
-                    def on_music_model_select(m):
-                        state['model'] = m
-                        refs['music_model_btn'].text = m.name
-                    
-                    with ui.dropdown_button(music_models[0].name, auto_close=True).classes('shrink-0').props('no-caps dropdown-icon=expand_more color=dark dense') as refs['music_model_btn']:
-                        for m in music_models:
-                            with ui.item(on_click=lambda m=m: on_music_model_select(m)).classes('neovak-model-item'):
-                                with ui.column().classes('gap-0.5 py-1'):
-                                    with ui.row().classes('items-center gap-2'):
-                                        ui.label(m.name).classes('text-white font-medium')
-                                        ui.badge(m.family).props('color=primary outline dense')
-                                        if m.size_gb > 0:
-                                            ui.label(f'{m.size_gb:.1f}GB').classes('text-zinc-500 text-xs')
-                                    if m.description:
-                                        ui.label(m.description).classes('text-zinc-400 text-xs')
-            
-            ui.label('DESCRIPTION').classes('neovak-section-header')
-            refs['music_prompt'] = ui.textarea(placeholder='Describe the music you want... e.g., "upbeat electronic dance track with synths"').classes('w-full neovak-prompt').props('outlined autogrow rows=3')
+            ui.label('STYLE TAGS').classes('neovak-section-header')
+            refs['caption'] = ui.textarea(
+                placeholder='indie pop, acoustic guitar, warm vocals, dreamy atmosphere'
+            ).classes('w-full neovak-prompt').props('outlined autogrow rows=2')
 
-            ui.label('STYLE').classes('neovak-section-header mt-4')
-            with ui.row().classes('gap-2 flex-wrap'):
-                for tag in MUSIC_STYLE_TAGS[:8]:
-                    def add_style(t=tag):
-                        refs['music_prompt'].value = (refs['music_prompt'].value or '') + f' {t}'
-                    ui.button(tag, on_click=add_style).props('flat dense size=sm').classes('text-zinc-400')
+            with ui.row().classes('gap-1 flex-wrap mt-2'):
+                for tag in MUSIC_STYLE_TAGS:
+                    def add_tag(t=tag):
+                        cur = refs['caption'].value or ''
+                        if cur and not cur.endswith(', '):
+                            cur = cur.rstrip(', ') + ', '
+                        refs['caption'].value = cur + t
+                    ui.button(tag, on_click=add_tag).props('flat dense size=sm').classes('text-zinc-400')
+
+            ui.label('LYRICS (optional)').classes('neovak-section-header mt-4')
+            refs['lyrics'] = ui.textarea(
+                placeholder='[Verse]\nWalking down this road\nCarrying this heavy load\n\n[Chorus]\nBut we keep on moving'
+            ).classes('w-full neovak-prompt').props('outlined autogrow rows=5')
+
+            with ui.row().classes('gap-2 mt-1'):
+                for marker in ['[Verse]', '[Chorus]', '[Bridge]', '[Outro]', '[Instrumental]']:
+                    def insert_marker(m=marker):
+                        cur = refs['lyrics'].value or ''
+                        if cur and not cur.endswith('\n'):
+                            cur += '\n'
+                        refs['lyrics'].value = cur + m + '\n'
+                    ui.button(marker, on_click=insert_marker).props('flat dense size=sm').classes('text-zinc-400')
+
+            async def do_expand():
+                caption = refs['caption'].value
+                if not caption:
+                    ui.notify('Enter some style tags first', type='warning')
+                    return
+                refs['expand_btn'].disable()
+                ui.notify('Expanding with AI...', type='info')
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: acestep_format_input(ACESTEP_URL, caption, refs['lyrics'].value or '')
+                )
+                if 'error' in result:
+                    ui.notify(f'Expand failed: {result["error"]}', type='negative')
+                else:
+                    refs['caption'].value = result['caption']
+                    if result['lyrics']:
+                        refs['lyrics'].value = result['lyrics']
+                    ui.notify('Expanded!', type='positive')
+                refs['expand_btn'].enable()
+
+            refs['expand_btn'] = ui.button('Expand with AI', on_click=do_expand).props('flat dense no-caps').classes('text-amber-400 mt-1')
 
             ui.label('DURATION').classes('neovak-section-header mt-4')
             refs['duration_btns'] = []
             with ui.row().classes('gap-2'):
                 for i, (label, dur, desc) in enumerate(MUSIC_DURATION_PRESETS):
+                    default_selected = (dur == 120)
                     def select_dur(d=dur, idx=i):
                         state['duration'] = d
                         for j, btn in enumerate(refs['duration_btns']):
                             btn.props('color=primary' if j == idx else 'color=dark')
-                    btn = ui.button(label, on_click=select_dur).props(f'dense no-caps {"color=primary" if dur == 15 else "color=dark"}')
+                    btn = ui.button(label, on_click=select_dur).props(
+                        f'dense no-caps {"color=primary" if default_selected else "color=dark"}'
+                    )
                     btn.tooltip(desc)
                     refs['duration_btns'].append(btn)
 
-        refs['music_gen_btn'] = ui.button('🎵 Generate Music', on_click=lambda: do_generate_music()).classes('w-full neovak-btn-primary')
+            # Advanced settings (collapsible)
+            with ui.expansion('Advanced Settings').classes('w-full mt-4'):
+                with ui.column().classes('gap-3 py-2'):
+                    with ui.row().classes('items-center gap-4'):
+                        seed_input = ui.number('Seed', value=-1, min=-1, step=1).classes('w-32')
+                        seed_input.on('update:model-value', lambda e: state.update(seed=int(e.args)))
+                        thinking_switch = ui.switch('Thinking (LM planner)', value=True)
+                        thinking_switch.on('update:model-value', lambda e: state.update(thinking=e.args))
+                    with ui.row().classes('items-center gap-4'):
+                        steps_input = ui.number('Inference steps', value=30, min=1, max=100, step=1).classes('w-32')
+                        steps_input.on('update:model-value', lambda e: state.update(infer_step=int(e.args)))
+                        guidance_input = ui.number('Guidance scale', value=15.0, min=0, max=30, step=0.5).classes('w-32')
+                        guidance_input.on('update:model-value', lambda e: state.update(guidance_scale=float(e.args)))
+                    with ui.row().classes('items-center gap-4'):
+                        gt_input = ui.number('Guidance (text)', value=0.0, min=0, max=10, step=0.5).classes('w-32')
+                        gt_input.on('update:model-value', lambda e: state.update(guidance_scale_text=float(e.args)))
+                        gl_input = ui.number('Guidance (lyric)', value=0.0, min=0, max=10, step=0.5).classes('w-32')
+                        gl_input.on('update:model-value', lambda e: state.update(guidance_scale_lyric=float(e.args)))
 
+        # Generate button
+        refs['gen_btn'] = ui.button('Generate Music', on_click=lambda: do_generate()).classes('w-full neovak-btn-primary')
+
+        # Progress
         with ui.column().classes('w-full gap-2'):
-            refs['music_progress'] = ui.linear_progress(value=0, show_value=False).classes('w-full neovak-progress')
-            refs['music_progress'].set_visibility(False)
-            refs['music_status'] = ui.label('').classes('text-zinc-400 text-sm')
+            refs['progress'] = ui.linear_progress(value=0, show_value=False).classes('w-full neovak-progress')
+            refs['progress'].set_visibility(False)
+            refs['status'] = ui.label('').classes('text-zinc-400 text-sm')
 
-        refs['music_output'] = ui.audio('').classes('w-full hidden')
+        # Output player
+        with ui.card().classes('w-full neovak-card p-4 hidden') as refs['output_card']:
+            refs['audio_player'] = ui.audio('').classes('w-full')
+            with ui.row().classes('items-center gap-3 mt-2'):
+                refs['output_info'] = ui.label('').classes('text-zinc-400 text-sm flex-1')
+                refs['seed_label'] = ui.label('').classes('text-zinc-500 text-xs')
+                refs['download_link'] = ui.link('Download', '').classes('text-amber-400 text-sm')
 
-    async def do_generate_music():
-        prompt = refs['music_prompt'].value
-        if not prompt:
-            ui.notify('Describe the music you want', type='warning')
+        # History strip
+        with ui.column().classes('w-full'):
+            ui.label('HISTORY').classes('neovak-section-header')
+            refs['history_row'] = ui.row().classes('gap-2 flex-wrap')
+
+    async def do_generate():
+        caption = refs['caption'].value
+        if not caption:
+            ui.notify('Enter style tags first', type='warning')
             return
 
-        refs['music_gen_btn'].disable()
-        refs['music_progress'].set_visibility(True)
-        refs['music_status'].set_text('Generating music...')
+        refs['gen_btn'].disable()
+        refs['progress'].set_visibility(True)
+        refs['progress'].set_value(0)
+        refs['status'].set_text('Submitting to ACE-Step...')
 
         try:
-            output_path, status = await asyncio.get_event_loop().run_in_executor(
+            output_path, status_msg = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: generate_music(
-                    prompt_text=prompt,
+                    prompt=caption,
+                    lyrics=refs['lyrics'].value or '',
                     duration=state['duration'],
+                    seed=state['seed'],
+                    thinking=state['thinking'],
+                    infer_step=state['infer_step'],
+                    guidance_scale=state['guidance_scale'],
+                    guidance_scale_text=state['guidance_scale_text'],
+                    guidance_scale_lyric=state['guidance_scale_lyric'],
                 )
             )
 
             if output_path:
-                refs['music_output'].set_source(output_path)
-                refs['music_output'].classes(remove='hidden')
-                refs['music_status'].set_text('✓ Music generated!')
+                app.add_media_file(local_file=output_path)
+                refs['audio_player'].set_source(app.add_media_file(local_file=output_path))
+                refs['output_card'].classes(remove='hidden')
+                refs['output_info'].set_text(status_msg.split(' | ')[0] if ' | ' in status_msg else status_msg)
+                seed_part = [p for p in status_msg.split(' | ') if 'seed' in p]
+                refs['seed_label'].set_text(seed_part[0] if seed_part else '')
+                refs['download_link'].props(f'href="{output_path}"')
+                refs['status'].set_text('Done!')
                 ui.notify('Music generated!', type='positive')
+
+                # Add to history
+                entry = {
+                    'path': output_path,
+                    'caption': caption,
+                    'duration': state['duration'],
+                    'status': status_msg,
+                }
+                state['history'].append(entry)
+                with refs['history_row']:
+                    idx = len(state['history']) - 1
+                    def load_history(i=idx):
+                        h = state['history'][i]
+                        app.add_media_file(local_file=h['path'])
+                        refs['audio_player'].set_source(app.add_media_file(local_file=h['path']))
+                        refs['output_card'].classes(remove='hidden')
+                        refs['output_info'].set_text(h['status'].split(' | ')[0])
+                    dur_label = f"{state['duration']}s"
+                    ui.button(f'{dur_label}', on_click=load_history).props('dense no-caps color=dark').tooltip(caption[:60])
             else:
-                refs['music_status'].set_text(f'✗ {status}')
-                ui.notify(status, type='negative')
+                refs['status'].set_text(f'Failed: {status_msg}')
+                ui.notify(status_msg, type='negative')
         except Exception as e:
-            refs['music_status'].set_text(f'✗ Error')
+            refs['status'].set_text(f'Error: {e}')
             ui.notify(str(e), type='negative')
         finally:
-            refs['music_gen_btn'].enable()
-            refs['music_progress'].set_visibility(False)
+            refs['gen_btn'].enable()
+            refs['progress'].set_visibility(False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
