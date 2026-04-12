@@ -1963,6 +1963,313 @@ def generate_video(prompt_text: str, model_name: str, width: int, height: int,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# VIDEO CHAIN GENERATION — Frame Extraction, I2V, Concatenation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_FFMPEG_BIN = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+
+
+def extract_last_frame(video_path: str, output_path: str = None) -> Optional[str]:
+    """Extract the last frame from a video using ffmpeg."""
+    if output_path is None:
+        output_path = str(Path(video_path).parent / f"{Path(video_path).stem}_lastframe.png")
+
+    cmd = [
+        _FFMPEG_BIN, "-y",
+        "-sseof", "-0.04",
+        "-i", video_path,
+        "-frames:v", "1",
+        "-update", "1",
+        output_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=30)
+    if result.returncode == 0 and Path(output_path).exists():
+        return output_path
+    return None
+
+
+def extract_first_frame(video_path: str, output_path: str = None) -> Optional[str]:
+    """Extract the first frame from a video using ffmpeg."""
+    if output_path is None:
+        output_path = str(Path(video_path).parent / f"{Path(video_path).stem}_firstframe.png")
+
+    cmd = [
+        _FFMPEG_BIN, "-y",
+        "-i", video_path,
+        "-frames:v", "1",
+        "-update", "1",
+        output_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=30)
+    if result.returncode == 0 and Path(output_path).exists():
+        return output_path
+    return None
+
+
+def concatenate_videos(video_paths: list, output_path: str = None) -> Optional[str]:
+    """Concatenate multiple video files into one using ffmpeg."""
+    if output_path is None:
+        ts = int(time.time())
+        output_path = str(OUTPUT_DIR / f"neovak_chain_{ts}.mp4")
+
+    list_path = str(Path(output_path).parent / f"concat_list_{int(time.time())}.txt")
+    with open(list_path, 'w') as f:
+        for vp in video_paths:
+            f.write(f"file '{vp}'\n")
+
+    cmd = [
+        _FFMPEG_BIN, "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", list_path,
+        "-c", "copy",
+        output_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    Path(list_path).unlink(missing_ok=True)
+
+    if result.returncode == 0 and Path(output_path).exists():
+        return output_path
+
+    # Fallback: re-encode if copy fails (different codecs)
+    with open(list_path, 'w') as f:
+        for vp in video_paths:
+            f.write(f"file '{vp}'\n")
+
+    cmd = [
+        _FFMPEG_BIN, "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", list_path,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        output_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    Path(list_path).unlink(missing_ok=True)
+
+    if result.returncode == 0 and Path(output_path).exists():
+        return output_path
+    return None
+
+
+def generate_video_from_image(prompt_text: str, model_name: str,
+                               image_path: str, width: int, height: int,
+                               num_frames: int, steps: int, cfg: float,
+                               seed: int, strength: float = 1.0,
+                               progress_callback=None) -> tuple[Optional[str], str]:
+    """Generate video using an image as the first frame (I2V mode).
+    Uses the ltxv_i2v_api.json workflow.
+    """
+    import random
+    from neovak_progress import track_generation_progress
+
+    running, status = check_backend()
+    if not running:
+        return None, "ComfyUI not running. Start it first."
+
+    input_path = Path(image_path)
+    if not input_path.exists():
+        return None, f"Input image not found: {image_path}"
+
+    workflow_path = WORKFLOWS_DIR / "ltxv_i2v_api.json"
+    if not workflow_path.exists():
+        return None, f"I2V workflow not found: {workflow_path}"
+
+    with open(workflow_path) as f:
+        workflow = json.load(f)
+
+    # Find model file
+    model_file = None
+    for search_path in MODEL_SEARCH_PATHS:
+        for pattern in ["**/*.safetensors", "**/*.ckpt"]:
+            for fp in search_path.glob(pattern):
+                if model_name in fp.stem:
+                    model_file = fp.name
+                    break
+
+    if not model_file:
+        model_file = f"{model_name}.safetensors"
+
+    actual_seed = seed if seed >= 0 else random.randint(0, 2**32 - 1)
+    negative_prompt = "low quality, worst quality, deformed, distorted, disfigured, motion smear, motion artifacts, fused fingers, bad anatomy, weird hand, ugly"
+
+    for node_id, node in workflow.items():
+        cls = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+
+        if cls == "CheckpointLoaderSimple":
+            inputs["ckpt_name"] = model_file
+        elif cls == "EmptyLTXVLatentVideo":
+            inputs["width"] = int(width)
+            inputs["height"] = int(height)
+            inputs["length"] = int(num_frames)
+        elif cls == "LTXVScheduler":
+            inputs["steps"] = int(steps)
+        elif cls == "SamplerCustom":
+            inputs["cfg"] = float(cfg)
+            inputs["noise_seed"] = actual_seed
+        elif cls == "CLIPTextEncode":
+            if node_id == "6":
+                inputs["text"] = prompt_text
+            elif node_id == "7":
+                inputs["text"] = negative_prompt
+        elif cls == "LoadImage":
+            inputs["image"] = str(input_path)
+        elif cls == "LTXVImgToVideoInplace":
+            inputs["strength"] = float(strength)
+
+    success, result = submit_workflow(workflow)
+    if not success:
+        return None, f"Submit failed: {result}"
+
+    prompt_id = result
+
+    status, output_filename, progress = track_generation_progress(
+        COMFYUI_URL, prompt_id, timeout=600, on_progress=progress_callback
+    )
+
+    if status == "completed" and output_filename:
+        output_path = None
+        for check_path in [
+            OUTPUT_DIR / output_filename,
+            NEOVAK_DIR / "output" / output_filename,
+        ]:
+            if check_path.exists():
+                output_path = str(check_path)
+                break
+
+        if not output_path:
+            time.sleep(2)
+            for check_path in [
+                OUTPUT_DIR / output_filename,
+                NEOVAK_DIR / "output" / output_filename,
+            ]:
+                if check_path.exists():
+                    output_path = str(check_path)
+                    break
+
+        if output_path:
+            return output_path, f"I2V generated • Seed: {actual_seed}"
+        else:
+            return None, f"Output file not found: {output_filename}"
+    elif status == "timeout":
+        return None, "Generation timed out after 10 minutes"
+    else:
+        return None, f"Generation failed: {progress.error_message or status}"
+
+
+def generate_video_chain(
+    segments: list,
+    model_name: str,
+    width: int, height: int,
+    num_frames: int, steps: int, cfg: float,
+    progress_callback=None
+) -> tuple:
+    """Generate a chain of video clips, each using the last frame of the previous.
+
+    segments: list of dicts with 'prompt' and 'seed' keys.
+    First segment generates text-to-video; subsequent use last frame as I2V input.
+    Returns (final_video_path, status_message, individual_clips).
+    """
+    clips = []
+    last_frame = None
+
+    for i, segment in enumerate(segments):
+        if progress_callback:
+            progress_callback(
+                int((i / len(segments)) * 90),
+                f"Segment {i + 1}/{len(segments)}: {segment['prompt'][:40]}..."
+            )
+
+        seg_seed = segment.get('seed', -1)
+
+        if i == 0 and last_frame is None:
+            clip_path, status = generate_video(
+                segment['prompt'], model_name, width, height,
+                num_frames, steps, cfg, seg_seed
+            )
+        else:
+            clip_path, status = generate_video_from_image(
+                segment['prompt'], model_name, last_frame,
+                width, height, num_frames, steps, cfg,
+                seg_seed, strength=0.95
+            )
+
+        if clip_path is None:
+            return None, f"Segment {i + 1} failed: {status}", clips
+
+        clips.append(clip_path)
+
+        last_frame = extract_last_frame(clip_path)
+        if last_frame is None:
+            return None, f"Failed to extract last frame from segment {i + 1}", clips
+
+    if progress_callback:
+        progress_callback(92, "Stitching clips together...")
+
+    final_path = concatenate_videos(clips)
+    if final_path:
+        total_dur = len(clips) * (num_frames / 24.0)
+        return final_path, f"Chain complete: {len(clips)} segments, ~{total_dur:.1f}s total", clips
+    else:
+        return None, "Failed to concatenate clips", clips
+
+
+def continue_video_chain(
+    existing_video_path: str,
+    segments: list,
+    model_name: str,
+    width: int, height: int,
+    num_frames: int, steps: int, cfg: float,
+    progress_callback=None
+) -> tuple:
+    """Extend an existing video with new segments.
+    Extracts the last frame of the existing video, then generates new I2V segments.
+    Returns (final_video_path, status_message, new_clips).
+    """
+    last_frame = extract_last_frame(existing_video_path)
+    if last_frame is None:
+        return None, "Failed to extract last frame from existing video", []
+
+    new_clips = []
+
+    for i, segment in enumerate(segments):
+        if progress_callback:
+            progress_callback(
+                int((i / len(segments)) * 85),
+                f"Extending segment {i + 1}/{len(segments)}: {segment['prompt'][:40]}..."
+            )
+
+        clip_path, status = generate_video_from_image(
+            segment['prompt'], model_name, last_frame,
+            width, height, num_frames, steps, cfg,
+            segment.get('seed', -1), strength=0.95
+        )
+
+        if clip_path is None:
+            return None, f"Segment {i + 1} failed: {status}", new_clips
+
+        new_clips.append(clip_path)
+
+        last_frame = extract_last_frame(clip_path)
+        if last_frame is None:
+            return None, f"Failed to extract last frame from segment {i + 1}", new_clips
+
+    if progress_callback:
+        progress_callback(90, "Stitching clips together...")
+
+    all_clips = [existing_video_path] + new_clips
+    final_path = concatenate_videos(all_clips)
+    if final_path:
+        total_dur = len(all_clips) * (num_frames / 24.0)
+        return final_path, f"Extended: {len(all_clips)} total segments, ~{total_dur:.1f}s", new_clips
+    else:
+        return None, "Failed to concatenate clips", new_clips
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # VOICE/SPEECH GENERATION (Chatterbox TTS)
 # ═══════════════════════════════════════════════════════════════════════════════
 

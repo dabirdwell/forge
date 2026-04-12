@@ -43,6 +43,9 @@ from neovak_backend import (
     IMAGE_SURPRISE_PROMPTS, IMAGE_STYLE_PRESETS, get_random_image_prompt,
     VIDEO_SURPRISE_PROMPTS, get_random_video_prompt,
     VOICE_QUICK_TEXTS, SFX_QUICK_PROMPTS, TAB_SUBTITLES,
+    # Video chain generation
+    extract_last_frame, extract_first_frame, concatenate_videos,
+    generate_video_from_image, generate_video_chain, continue_video_chain,
 )
 from acestep_client import (
     format_input as acestep_format_input,
@@ -1921,10 +1924,10 @@ def video_generation_panel():
 
             refs['video_gen_btn'] = ui.button('Create', on_click=lambda: do_generate_video()).props('no-caps').classes('neovak-btn-primary')
 
-        # ── Mode toggle: Text→Video / Image→Video ──
+        # ── Mode toggle: Text→Video / Image→Video / Chain ──
         with ui.row().classes('neovak-mode-tabs'):
             refs['video_mode_btns'] = {}
-            for mode_id, mode_label in [('text2video', 'Text \u2192 Video'), ('img2video', 'Image \u2192 Video')]:
+            for mode_id, mode_label in [('text2video', 'Text \u2192 Video'), ('img2video', 'Image \u2192 Video'), ('chain', 'Chain')]:
                 def set_video_mode(m=mode_id):
                     state['mode'] = m
                     for mid, btn in refs['video_mode_btns'].items():
@@ -1933,6 +1936,7 @@ def video_generation_panel():
                         else:
                             btn.classes(remove='active')
                     refs['i2v_section'].set_visibility(m == 'img2video')
+                    refs['chain_section'].set_visibility(m == 'chain')
                 btn = ui.button(mode_label, on_click=set_video_mode).props('flat no-caps')
                 btn.classes('neovak-mode-tab' + (' active' if mode_id == 'text2video' else ''))
                 refs['video_mode_btns'][mode_id] = btn
@@ -1999,6 +2003,94 @@ def video_generation_panel():
                     pass
 
         refs['i2v_section'].set_visibility(state['mode'] == 'img2video')
+
+        # ── Chain mode: Storyboard interface ──
+        with ui.column().classes('w-full neovak-mode-input-area') as chain_section:
+            refs['chain_section'] = chain_section
+            ui.label('STORYBOARD').classes('neovak-section-header mb-3')
+
+            state['chain_segments'] = [
+                {'prompt': '', 'seed': -1},
+                {'prompt': '', 'seed': -1},
+            ]
+            state['chain_clips'] = []
+            state['chain_continue_from'] = None
+            refs['chain_segment_container'] = None
+
+            def _rebuild_chain_segments():
+                if refs['chain_segment_container'] is None:
+                    return
+                refs['chain_segment_container'].clear()
+                with refs['chain_segment_container']:
+                    for idx, seg in enumerate(state['chain_segments']):
+                        is_first = (idx == 0 and state['chain_continue_from'] is None)
+                        mode_label = 'text-to-video' if is_first else 'last frame \u2192 first frame'
+                        with ui.card().classes('w-full neovak-card p-4'):
+                            with ui.row().classes('items-center gap-2 mb-2'):
+                                ui.label(f'Segment {idx + 1}').classes('font-medium').style('color: var(--text-primary); font-size: 0.875rem;')
+                                ui.label(f'({mode_label})').classes('text-xs').style('color: var(--text-muted); font-style: italic;')
+                                if len(state['chain_clips']) > idx:
+                                    ui.icon('check_circle', size='16px').style('color: var(--accent);')
+                            prompt_input = ui.textarea(
+                                placeholder=f'Describe segment {idx + 1}...',
+                                value=seg.get('prompt', '')
+                            ).classes('w-full').props('dense outlined rows=2').style('color: var(--text-primary); background: var(--surface-0);')
+                            def on_prompt_change(e, i=idx):
+                                state['chain_segments'][i]['prompt'] = e.value
+                            prompt_input.on('update:model-value', on_prompt_change)
+                            with ui.row().classes('items-center gap-3 mt-1'):
+                                ui.label('Seed').classes('text-xs').style('color: var(--text-muted);')
+                                seed_input = ui.number(value=seg.get('seed', -1), min=-1, step=1).classes('neovak-slider-value').props('dense borderless').style('width: 100px;')
+                                def on_seed_change(e, i=idx):
+                                    state['chain_segments'][i]['seed'] = int(e.value or -1)
+                                seed_input.on('update:model-value', on_seed_change)
+
+            with ui.column().classes('w-full gap-3') as seg_container:
+                refs['chain_segment_container'] = seg_container
+
+            _rebuild_chain_segments()
+
+            # Continue-from indicator
+            refs['chain_continue_label'] = ui.label('').classes('text-xs hidden').style('color: var(--accent);')
+
+            with ui.row().classes('items-center gap-3 mt-2'):
+                def add_chain_segment():
+                    state['chain_segments'].append({'prompt': '', 'seed': -1})
+                    _rebuild_chain_segments()
+                    _update_chain_info()
+
+                def remove_chain_segment():
+                    if len(state['chain_segments']) > 1:
+                        state['chain_segments'].pop()
+                        _rebuild_chain_segments()
+                        _update_chain_info()
+
+                ui.button('+ Add Segment', on_click=add_chain_segment).props('flat dense no-caps').classes('neovak-enhance-btn')
+                ui.button('- Remove Last', on_click=remove_chain_segment).props('flat dense no-caps').classes('neovak-enhance-btn')
+
+            with ui.row().classes('items-center gap-4 mt-2'):
+                refs['chain_info'] = ui.label('').classes('text-xs').style('color: var(--text-secondary);')
+
+            def _update_chain_info():
+                n = len(state['chain_segments'])
+                fps = 24.0
+                est_dur = n * (state['num_frames'] / fps)
+                refs['chain_info'].set_text(f'Segments: {n} | Est. duration: ~{est_dur:.1f}s | Frames/segment: {state["num_frames"]}')
+
+            _update_chain_info()
+
+            refs['chain_gen_btn'] = ui.button('Generate Chain', on_click=lambda: do_generate_chain()).props('no-caps').classes('neovak-btn-primary mt-3')
+
+            with ui.column().classes('w-full gap-1 mt-2'):
+                refs['chain_progress'] = ui.linear_progress(value=0, show_value=False).classes('w-full neovak-progress')
+                refs['chain_progress'].set_visibility(False)
+                refs['chain_progress_text'] = ui.label('').classes('neovak-progress-text text-center w-full')
+                refs['chain_progress_text'].set_visibility(False)
+
+            refs['chain_output_area'] = ui.column().classes('w-full gap-3 mt-3')
+            refs['chain_output_area'].set_visibility(False)
+
+        refs['chain_section'].set_visibility(state['mode'] == 'chain')
 
         # Hero area for video
         with ui.element('div').classes('neovak-hero-area w-full'):
