@@ -145,3 +145,10 @@ MIT License
 ---
 
 Built with [NiceGUI](https://nicegui.io) and [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+
+
+## Related
+- [[Products and Services Canon]]
+- [[CHANGELOG]]
+- [[NeoVak_Project]]
+- [[Foundation Canon]]

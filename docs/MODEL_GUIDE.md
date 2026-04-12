@@ -182,3 +182,10 @@ NeoVak auto-detects model types from names:
 - **[CivitAI](https://civitai.com)** — Community models, many styles
 - **[HuggingFace](https://huggingface.co)** — Official models, research models
 - **[OpenModelDB](https://openmodeldb.info)** — Upscaler models
+
+
+## Related
+- [[Products and Services Canon]]
+- [[TTS_BACKENDS]]
+- [[NEOVAK_PHASE1]]
+- [[Foundation Canon]]

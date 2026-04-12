@@ -180,3 +180,10 @@ Approximate sizes:
 - Linux .tar.gz: ~2 MB
 
 First-run downloads (dependencies): ~200 MB
+
+
+## Related
+- [[Products and Services Canon]]
+- [[TTS_BACKENDS]]
+- [[NEOVAK_PHASE1]]
+- [[Foundation Canon]]

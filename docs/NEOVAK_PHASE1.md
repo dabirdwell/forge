@@ -104,3 +104,10 @@ Phases 1-2 complete. Phase 3: animated UI components."
 
 git push origin main
 ```
+
+
+## Related
+- [[Products and Services Canon]]
+- [[TTS_BACKENDS]]
+- [[MODEL_GUIDE]]
+- [[Foundation Canon]]

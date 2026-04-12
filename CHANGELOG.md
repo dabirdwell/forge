@@ -232,3 +232,10 @@ All notable changes to NeoVak will be documented in this file.
 - Initial prototype
 - ComfyUI backend integration
 - NiceGUI interface foundation
+
+
+## Related
+- [[Products and Services Canon]]
+- [[NeoVak_Project]]
+- [[VISION]]
+- [[Foundation Canon]]

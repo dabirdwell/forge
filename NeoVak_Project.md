@@ -15,3 +15,4 @@ NeoVak text-to-speech and AI voice technology project.
 ## Related
 - [[Products and Services Canon]]
 - [[Dashboard]]
+- [[Luminas_Whisper]]

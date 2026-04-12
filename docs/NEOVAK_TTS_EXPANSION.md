@@ -192,3 +192,4 @@ def _get_qwen_backend():
 ---
 
 *Assigned to: Claude Code session (substantial development)*
+- [[Bootstrap_Current]]
