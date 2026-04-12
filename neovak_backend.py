@@ -3519,3 +3519,78 @@ def build_controlnet_workflow(
     }
 
     return workflow
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LUMINA'S WORLD — Surprise Prompts, Style Presets, Quick Texts
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import random as _random
+
+IMAGE_SURPRISE_PROMPTS = [
+    "A cozy bookshop at twilight with warm amber light spilling from hexagonal windows",
+    "An octopus librarian organizing books on coral shelves, deep sea bioluminescence",
+    "A steampunk observatory with brass telescopes and copper piping, warm tungsten glow",
+    "A grandmother's kitchen where the pots and pans float in mid-air, morning light",
+    "A fox wearing a tiny backpack walking through an autumn forest, golden hour",
+    "An abandoned space station overgrown with glowing plants, zero gravity flowers",
+    "A midnight jazz bar where the instruments play themselves, blue and amber smoke",
+    "A lighthouse keeper's desk covered in maps and mechanical insects, candlelight",
+    "A paper airplane flying over a miniature city made of old books, afternoon light",
+    "An underwater tea party with jellyfish lanterns and seahorse waiters",
+    "A clockwork bird perched on a wire above a rainy street, copper and glass",
+    "A child discovering a door in a tree trunk that opens to a starfield",
+    "A mechanical garden where flowers are made of brass gears and crystal petals",
+    "An old radio that plays colors instead of sound, warm vacuum tube glow",
+    "A cat sleeping on a stack of letters in a post office from the future",
+]
+
+IMAGE_STYLE_PRESETS = {
+    "Cinematic": "cinematic lighting, dramatic, volumetric fog, anamorphic lens flare",
+    "Analog Photo": "35mm film grain, warm tones, soft focus, vintage photography",
+    "Watercolor": "watercolor painting, soft edges, paper texture, loose brushstrokes",
+    "Neon Noir": "neon lights, rain, dark alley, cyberpunk, reflective wet surfaces",
+    "Studio Ghibli": "anime style, lush scenery, whimsical, soft colors, hand-drawn feel",
+    "Golden Hour": "golden hour sunlight, warm glow, long shadows, soft atmosphere",
+    "Lumina": "warm amber glow, vacuum tube technology, hexagonal lattice, brass and copper, retro-futuristic",
+}
+
+VIDEO_SURPRISE_PROMPTS = [
+    "Clouds forming and dissolving over a mountain peak, time-lapse, golden hour",
+    "A candle flame dancing in slow motion, warm amber light against dark background",
+    "Rain drops falling in slow motion on a copper surface, macro, beautiful reflections",
+    "Northern lights flowing across a starry sky, gentle motion, vivid greens and purples",
+    "A flower blooming in time-lapse, soft natural light, delicate petals unfolding",
+    "Waves gently lapping on a moonlit shore, serene, slow motion, silver light",
+    "Embers drifting upward from a campfire, dark background, warm amber particles",
+    "A hummingbird hovering at a flower, iridescent feathers, slow motion, bokeh",
+]
+
+VOICE_QUICK_TEXTS = {
+    "Greeting": "Hello there! It's wonderful to meet you. I hope you're having a great day.",
+    "Narration": "The sun had barely risen when the first birds began their morning chorus. A gentle mist clung to the valley floor.",
+    "Excitement": "Oh my goodness, you won't believe what just happened! [laugh] This is absolutely incredible!",
+    "Dramatic": "In the depths of the ancient forest, [sigh] a single light flickered. And then... silence.",
+    "Podcast": "Welcome back to the show, everyone. Today we're diving into something that's been on my mind for weeks.",
+}
+
+SFX_QUICK_PROMPTS = {
+    "Nature": ["Rain on a tin roof", "Thunder rolling in the distance", "Wind through pine trees", "Crackling campfire"],
+    "Mechanical": ["Old clock ticking", "Steam hissing from a pipe", "Gears grinding slowly", "Typewriter keys clacking"],
+    "Sci-Fi": ["Spaceship engine humming", "Laser beam charging up", "Teleporter activation", "Robot servo whirring"],
+    "Musical": ["Piano key pressed softly", "Guitar string plucked", "Drum hit, reverberant room", "Glass harmonica tone"],
+}
+
+TAB_SUBTITLES = {
+    "image": "Paint with light",
+    "video": "Set time in motion",
+    "voice": "Give breath to words",
+    "music": "Compose from nothing",
+    "sfx": "Shape the air",
+}
+
+def get_random_image_prompt() -> str:
+    return _random.choice(IMAGE_SURPRISE_PROMPTS)
+
+def get_random_video_prompt() -> str:
+    return _random.choice(VIDEO_SURPRISE_PROMPTS)

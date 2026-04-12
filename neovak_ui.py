@@ -39,6 +39,10 @@ from neovak_backend import (
     # ControlNet
     generate_with_controlnet, discover_controlnet_models,
     CONTROLNET_PREPROCESSORS, CONTROLNET_MODELS,
+    # Lumina's World
+    IMAGE_SURPRISE_PROMPTS, IMAGE_STYLE_PRESETS, get_random_image_prompt,
+    VIDEO_SURPRISE_PROMPTS, get_random_video_prompt,
+    VOICE_QUICK_TEXTS, SFX_QUICK_PROMPTS, TAB_SUBTITLES,
 )
 from acestep_client import (
     format_input as acestep_format_input,
@@ -885,6 +889,142 @@ CUSTOM_CSS = """
     object-fit: cover;
     border-radius: 4px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   LUMINA'S WORLD — Design System Extensions
+   Hexagonal progress, whisper pulse dots, tube warming, foam loading
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Hexagonal progress indicator */
+.neovak-hex-progress {
+    background: repeating-linear-gradient(
+        60deg,
+        var(--surface-2) 0px,
+        var(--surface-2) 10px,
+        var(--surface-3) 10px,
+        var(--surface-3) 20px
+    );
+    border-radius: 4px;
+    overflow: hidden;
+    height: 6px;
+}
+.neovak-hex-progress .bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--tube-warm), var(--tube-hot), var(--filament-bright));
+    transition: width 0.3s ease;
+}
+
+/* Whisper pulse — ambient presence indicator */
+@keyframes whisper-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1.0; transform: scale(1.15); }
+}
+.neovak-whisper-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--tube-warm);
+    animation: whisper-pulse 3s ease-in-out infinite;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.neovak-whisper-dot.cold {
+    background: var(--tube-cold);
+    animation: none;
+}
+
+/* Foam animation for loading/processing states */
+@keyframes foam-drift {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 100% 100%; }
+}
+.neovak-foam-loading {
+    background: radial-gradient(circle at 20% 50%, var(--accent-muted) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, var(--accent-muted) 0%, transparent 50%),
+                radial-gradient(circle at 50% 80%, var(--accent-muted) 0%, transparent 50%);
+    background-size: 200% 200%;
+    animation: foam-drift 4s ease-in-out infinite;
+}
+
+/* Lumina tab subtitle */
+.neovak-tab-subtitle {
+    font-size: 0.6875rem;
+    font-style: italic;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* Style preset chips */
+.neovak-style-chip {
+    background: var(--surface-3) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 16px !important;
+    padding: 0.25rem 0.75rem !important;
+    font-size: 0.75rem !important;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.neovak-style-chip:hover {
+    background: var(--accent-muted) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+.neovak-style-chip.active {
+    background: var(--accent-muted) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+
+/* Sound board grid */
+.neovak-soundboard-btn {
+    background: var(--surface-3) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 8px !important;
+    padding: 0.75rem !important;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+}
+.neovak-soundboard-btn:hover {
+    background: var(--surface-4) !important;
+    border-color: var(--accent) !important;
+}
+.neovak-soundboard-btn:active {
+    background: var(--accent-muted) !important;
+    transform: scale(0.97);
+}
+
+/* Empty state card */
+.neovak-empty-state {
+    background: var(--accent-muted) !important;
+    border: 1px solid rgba(212, 145, 42, 0.2) !important;
+    border-radius: 12px !important;
+    padding: 2rem !important;
+    text-align: center;
+}
+
+/* System status bar */
+.neovak-status-bar {
+    background: var(--surface-2);
+    border-top: 1px solid var(--border-subtle);
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+.neovak-status-bar-item {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+.neovak-status-bar-separator {
+    width: 1px;
+    height: 16px;
+    background: var(--border-subtle);
+}
 </style>
 """
 
@@ -1133,11 +1273,10 @@ def image_generation_panel():
     models = [m for m in ALL_MODELS.get("image", []) if m.available_on_system()]
 
     if not models:
-        with ui.column().classes('items-center justify-center py-12 gap-6 max-w-lg mx-auto'):
-            ui.icon('image', size='64px').classes('text-zinc-600')
-            ui.label('No image models found').classes('text-zinc-400 text-xl')
-            ui.label('Download a model to start creating').classes('text-zinc-500 text-sm')
-
+        with ui.column().classes('items-center justify-center py-12 gap-6 max-w-lg mx-auto neovak-empty-state'):
+            ui.icon('image', size='48px').style('color: var(--tube-warm);')
+            ui.label('Your image studio is ready').classes('text-lg font-medium').style('color: var(--text-primary);')
+            ui.label('Add an image model to begin creating.').style('color: var(--text-secondary);')
             with ui.card().classes('w-full neovak-card p-5 mt-2'):
                 ui.label('QUICK START').classes('neovak-section-header mb-4')
                 with ui.column().classes('gap-3'):
@@ -1145,7 +1284,7 @@ def image_generation_panel():
                         ui.icon('bolt', size='24px').classes('text-amber-400')
                         with ui.column().classes('flex-1 gap-0'):
                             ui.label('DreamShaper 8').classes('font-medium text-white')
-                            ui.label('2GB • Fast & versatile').classes('text-zinc-400 text-xs')
+                            ui.label('2GB - Fast & versatile').classes('text-zinc-400 text-xs')
                         ui.link('Download', 'https://civitai.com/api/download/models/128713', new_tab=True).classes('text-cyan-400 text-sm')
                 ui.separator().classes('my-3')
                 ui.label('Place .safetensors in: ComfyUI/models/checkpoints/').classes('text-zinc-500 text-xs')
@@ -1202,11 +1341,10 @@ def image_generation_panel():
             refs['prompt'] = ui.input(placeholder='Describe what you want to create...').classes('flex-1 neovak-command-prompt').props('dense outlined')
 
             def set_random_prompt():
-                import random
-                refs['prompt'].value = random.choice(INSPIRATION_PROMPTS)
-                ui.notify('✨ Try this idea!', type='positive', position='top', timeout=1500)
+                refs['prompt'].value = get_random_image_prompt()
+                ui.notify('Surprise!', type='positive', position='top', timeout=1500)
 
-            ui.button('🎲', on_click=set_random_prompt).props('flat dense').tooltip('Random inspiration')
+            ui.button('Surprise Me', on_click=set_random_prompt).props('flat dense no-caps').classes('neovak-enhance-btn').tooltip('Random creative prompt')
 
             def do_enhance():
                 original = refs['prompt'].value or ''
@@ -1221,6 +1359,19 @@ def image_generation_panel():
 
             refs['gen_btn'] = ui.button('Create', on_click=lambda: do_generate()).props('no-caps').classes('neovak-btn-primary')
             refs['gen_btn']._props['data-neovak-generate'] = 'true'
+
+        # ─────────────────────────────────────────────────────────────────────
+        # STYLE PRESETS - Clickable chips that append to prompt
+        # ─────────────────────────────────────────────────────────────────────
+        with ui.row().classes('gap-2 flex-wrap px-1'):
+            ui.label('STYLE').classes('neovak-section-header mb-0 self-center mr-1')
+            for style_name, style_suffix in IMAGE_STYLE_PRESETS.items():
+                def apply_style(name=style_name, suffix=style_suffix):
+                    current = refs['prompt'].value or ''
+                    if suffix not in current:
+                        refs['prompt'].value = f'{current}, {suffix}' if current else suffix
+                        ui.notify(f'{name} style applied', type='positive', position='top', timeout=1500)
+                ui.button(style_name, on_click=apply_style).props('flat dense no-caps size=sm').classes('neovak-style-chip')
 
         # ─────────────────────────────────────────────────────────────────────
         # HERO AREA (Center) - Image Display + Quick Actions
@@ -1255,6 +1406,26 @@ def image_generation_panel():
                         ''')
 
                 refs['download_btn'] = ui.button('⬇ Download', on_click=download_image).props('flat dense no-caps').classes('neovak-quick-action-btn hidden').tooltip('Download')
+
+                def do_regenerate():
+                    if state['last_seed'] is not None:
+                        refs['seed'].value = state['last_seed']
+                        do_generate()
+
+                refs['regen_btn'] = ui.button('Re-generate', on_click=lambda: do_regenerate()).props('flat dense no-caps').classes('neovak-quick-action-btn hidden').tooltip('Same seed + prompt')
+
+                def do_vary():
+                    refs['seed'].value = -1
+                    do_generate()
+
+                refs['vary_btn'] = ui.button('Vary', on_click=lambda: do_vary()).props('flat dense no-caps').classes('neovak-quick-action-btn hidden').tooltip('Same prompt, new seed')
+
+                def do_animate_this():
+                    if state['last_output']:
+                        app.storage.general['animate_source'] = state['last_output']
+                        ui.notify('Image saved for animation. Switch to Video tab and use Image-to-Video mode.', type='positive', timeout=4000)
+
+                refs['animate_btn'] = ui.button('Animate', on_click=do_animate_this).props('flat dense no-caps').classes('neovak-quick-action-btn hidden').tooltip('Send to Video tab for I2V')
 
             # Progress bar
             with ui.column().classes('w-full max-w-lg gap-1 mt-3'):
@@ -1555,12 +1726,16 @@ def image_generation_panel():
             return
 
         refs['gen_btn'].disable()
-        refs['gen_btn'].text = '⏳ Creating...'
+        refs['gen_btn'].text = 'Warming tubes...'
+        refs['gen_btn'].classes(add='neovak-warming')
         refs['progress'].set_visibility(True)
         refs['progress_text'].set_visibility(True)
-        
+
         # Tube goes hot during generation
         refs['tube'].classes(remove='cold warm error', add='hot')
+        await asyncio.sleep(0.8)
+        refs['gen_btn'].text = 'Creating...'
+        refs['gen_btn'].classes(remove='neovak-warming')
 
         import time as time_module
         start_time = time_module.time()
@@ -1642,6 +1817,9 @@ def image_generation_panel():
                 refs['seed_display'].classes(remove='hidden')
                 refs['copy_seed_btn'].classes(remove='hidden')
                 refs['download_btn'].classes(remove='hidden')
+                refs['regen_btn'].classes(remove='hidden')
+                refs['vary_btn'].classes(remove='hidden')
+                refs['animate_btn'].classes(remove='hidden')
 
                 ui.notify('Image created!', type='positive')
                 add_to_history(output_path, prompt or f'[{mode}]', state['model'].name, seed)
@@ -1671,15 +1849,14 @@ def image_generation_panel():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def video_generation_panel():
-    """Video generation panel with centered layout."""
+    """Video generation panel with centered layout, I2V mode, history, surprise me."""
     video_models = [m for m in ALL_MODELS.get('video', []) if m.available_on_system()]
 
     if not video_models:
-        with ui.column().classes('items-center justify-center py-12 gap-6 max-w-lg mx-auto'):
-            ui.icon('movie', size='64px').classes('text-zinc-600')
-            ui.label('No video models found').classes('text-zinc-400 text-xl')
-            ui.label('Download a model to start creating videos').classes('text-zinc-500 text-sm')
-
+        with ui.column().classes('items-center justify-center py-12 gap-6 max-w-lg mx-auto neovak-empty-state'):
+            ui.icon('movie', size='48px').style('color: var(--tube-warm);')
+            ui.label('Your video studio is ready').classes('text-lg font-medium').style('color: var(--text-primary);')
+            ui.label('Add a video model to begin creating.').style('color: var(--text-secondary);')
             with ui.card().classes('w-full neovak-card p-5 mt-2'):
                 ui.label('QUICK START').classes('neovak-section-header mb-4')
                 with ui.column().classes('gap-3'):
@@ -1687,7 +1864,7 @@ def video_generation_panel():
                         ui.icon('star', size='24px').classes('text-amber-400')
                         with ui.column().classes('flex-1 gap-0'):
                             ui.label('LTX-Video 0.9.1').classes('font-medium text-white')
-                            ui.label('5GB • Works great on Mac').classes('text-zinc-400 text-xs')
+                            ui.label('5GB - Works great on Mac').classes('text-zinc-400 text-xs')
                         ui.link('Download', 'https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.1.safetensors', new_tab=True).classes('text-cyan-400 text-sm')
                 ui.separator().classes('my-3')
                 ui.label('Place .safetensors in: ComfyUI/models/checkpoints/').classes('text-zinc-500 text-xs')
@@ -1700,15 +1877,18 @@ def video_generation_panel():
         'steps': 30, 'cfg': 3.5,
         'last_output': None, 'last_seed': None,
         'loop_enabled': True,
+        'mode': 'text2video',
+        'i2v_source': None,
+        'i2v_strength': 0.75,
+        'history': [],
     }
     refs = {}
 
     with ui.column().classes('w-full gap-4'):
         # Command bar
         with ui.row().classes('w-full neovak-command-bar items-center gap-3'):
-            # Tube status indicator
             refs['tube'] = ui.element('div').classes('neovak-tube warm')
-            
+
             def on_video_model_select(m):
                 state['model'] = m
                 refs['video_model_btn'].text = m.name
@@ -1720,6 +1900,12 @@ def video_generation_panel():
 
             refs['video_prompt'] = ui.input(placeholder='Describe the video you want to create...').classes('flex-1 neovak-command-prompt').props('dense outlined')
 
+            def set_random_video_prompt():
+                refs['video_prompt'].value = get_random_video_prompt()
+                ui.notify('Surprise!', type='positive', position='top', timeout=1500)
+
+            ui.button('Surprise Me', on_click=set_random_video_prompt).props('flat dense no-caps').classes('neovak-enhance-btn').tooltip('Random motion prompt')
+
             def do_enhance_video():
                 original = refs['video_prompt'].value or ''
                 if not original.strip():
@@ -1727,11 +1913,90 @@ def video_generation_panel():
                     return
                 enhanced = enhance_prompt(original, style="cinematic")
                 refs['video_prompt'].value = enhanced
-                ui.notify('✨ Enhanced!', type='positive', position='top', timeout=1500)
+                ui.notify('Enhanced!', type='positive', position='top', timeout=1500)
 
-            ui.button('✨', on_click=do_enhance_video).props('flat dense').classes('neovak-enhance-btn').tooltip('Enhance')
+            ui.button('Enhance', on_click=do_enhance_video).props('flat dense no-caps').classes('neovak-enhance-btn').tooltip('Enhance prompt')
 
             refs['video_gen_btn'] = ui.button('Create', on_click=lambda: do_generate_video()).props('no-caps').classes('neovak-btn-primary')
+
+        # ── Mode toggle: Text→Video / Image→Video ──
+        with ui.row().classes('neovak-mode-tabs'):
+            refs['video_mode_btns'] = {}
+            for mode_id, mode_label in [('text2video', 'Text \u2192 Video'), ('img2video', 'Image \u2192 Video')]:
+                def set_video_mode(m=mode_id):
+                    state['mode'] = m
+                    for mid, btn in refs['video_mode_btns'].items():
+                        if mid == m:
+                            btn.classes(add='active')
+                        else:
+                            btn.classes(remove='active')
+                    refs['i2v_section'].set_visibility(m == 'img2video')
+                btn = ui.button(mode_label, on_click=set_video_mode).props('flat no-caps')
+                btn.classes('neovak-mode-tab' + (' active' if mode_id == 'text2video' else ''))
+                refs['video_mode_btns'][mode_id] = btn
+
+        # I2V mode inputs
+        with ui.column().classes('w-full neovak-mode-input-area') as i2v_section:
+            refs['i2v_section'] = i2v_section
+            ui.label('SOURCE IMAGE').classes('neovak-section-header mb-3')
+            with ui.row().classes('items-start gap-6'):
+                with ui.column().classes('items-center gap-2'):
+                    refs['i2v_source_el'] = ui.element('div').classes('neovak-source-upload')
+                    with refs['i2v_source_el']:
+                        refs['i2v_preview'] = ui.image().classes('w-full h-full object-cover hidden')
+                        refs['i2v_placeholder'] = ui.column().classes('items-center')
+                        with refs['i2v_placeholder']:
+                            ui.icon('add_photo_alternate', size='32px').classes('text-zinc-500')
+                            ui.label('Upload').classes('text-zinc-500 text-xs')
+
+                    async def handle_i2v_upload(e):
+                        if e.content:
+                            import tempfile, base64
+                            content = e.content.read()
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as f:
+                                f.write(content)
+                                state['i2v_source'] = f.name
+                            refs['i2v_preview'].set_source(f'data:image/png;base64,{base64.b64encode(content).decode()}')
+                            refs['i2v_preview'].classes(remove='hidden')
+                            refs['i2v_placeholder'].set_visibility(False)
+                            ui.notify('Source image loaded', type='positive')
+
+                    refs['i2v_upload'] = ui.upload(on_upload=handle_i2v_upload, auto_upload=True).props('accept=image/* flat dense').classes('hidden')
+                    refs['i2v_source_el'].on('click', lambda: refs['i2v_upload'].run_method('pickFiles'))
+
+                with ui.column().classes('gap-1 flex-1'):
+                    ui.label('Image Influence').classes('neovak-control-name')
+                    with ui.row().classes('neovak-slider-control'):
+                        refs['i2v_strength'] = ui.slider(min=0.3, max=1.0, value=0.75, step=0.05).classes('flex-1')
+                        refs['i2v_strength_input'] = ui.number(value=0.75, min=0.1, max=1.0, step=0.05).classes('neovak-slider-value').props('dense borderless')
+                    def sync_i2v_s(e): refs['i2v_strength_input'].value = float(e.args)
+                    def sync_i2v_i(e):
+                        val = max(0.1, min(1.0, float(e.value or 0.75)))
+                        refs['i2v_strength'].value = val
+                    refs['i2v_strength'].on('update:model-value', sync_i2v_s)
+                    refs['i2v_strength_input'].on('update:model-value', sync_i2v_i)
+                    ui.label('How much the image influences the video').classes('neovak-control-hint')
+
+            # Auto-load from "Animate This" in image tab
+            animate_src = app.storage.general.get('animate_source')
+            if animate_src:
+                import base64
+                try:
+                    with open(animate_src, 'rb') as f:
+                        content = f.read()
+                    state['i2v_source'] = animate_src
+                    refs['i2v_preview'].set_source(f'data:image/png;base64,{base64.b64encode(content).decode()}')
+                    refs['i2v_preview'].classes(remove='hidden')
+                    refs['i2v_placeholder'].set_visibility(False)
+                    state['mode'] = 'img2video'
+                    refs['video_mode_btns']['img2video'].classes(add='active')
+                    refs['video_mode_btns']['text2video'].classes(remove='active')
+                    i2v_section.set_visibility(True)
+                    app.storage.general.pop('animate_source', None)
+                except Exception:
+                    pass
+
+        refs['i2v_section'].set_visibility(state['mode'] == 'img2video')
 
         # Hero area for video
         with ui.element('div').classes('neovak-hero-area w-full'):
@@ -1741,7 +2006,7 @@ def video_generation_panel():
                     ui.icon('movie', size='48px').classes('text-zinc-600')
                     ui.label('Your video will appear here').classes('text-zinc-500 text-sm')
 
-                refs['output_video'] = ui.video('').classes('w-full h-full object-contain hidden').props('loop')
+                refs['output_video'] = ui.video('').classes('w-full h-full object-contain hidden')
 
             # Transport controls
             with ui.row().classes('neovak-transport items-center'):
@@ -1753,6 +2018,16 @@ def video_generation_panel():
 
                 ui.button(icon='play_arrow', on_click=video_play_pause).props('flat dense').classes('neovak-transport-btn').tooltip('Play/Pause')
 
+                def toggle_loop():
+                    state['loop_enabled'] = not state['loop_enabled']
+                    loop_prop = 'loop' if state['loop_enabled'] else ''
+                    refs['output_video'].props(loop_prop)
+                    refs['loop_btn'].classes(add='active' if state['loop_enabled'] else '', remove='' if state['loop_enabled'] else 'active')
+                    ui.notify(f'Loop {"on" if state["loop_enabled"] else "off"}', position='top', timeout=1000)
+
+                refs['loop_btn'] = ui.button(icon='loop', on_click=toggle_loop).props('flat dense').classes('neovak-transport-btn active').tooltip('Toggle loop')
+                refs['output_video'].props('loop')
+
                 refs['video_seed_display'] = ui.label('').classes('neovak-seed-display hidden ml-auto')
 
             # Progress
@@ -1762,9 +2037,7 @@ def video_generation_panel():
                 refs['video_progress_text'] = ui.label('').classes('neovak-progress-text text-center w-full')
                 refs['video_progress_text'].set_visibility(False)
 
-        # ─────────────────────────────────────────────────────────────────────
-        # VIDEO HISTORY STRIP
-        # ─────────────────────────────────────────────────────────────────────
+        # ── Video history strip ──
         with ui.element('div').classes('neovak-history-strip w-full') as video_history:
             refs['video_history_container'] = video_history
             ui.label('Recent videos will appear here').classes('text-zinc-500 text-xs')
@@ -1809,19 +2082,42 @@ def video_generation_panel():
                         btn = ui.button(name, on_click=select_qual).props(f'dense no-caps {"color=primary" if i == 1 else "color=dark"}')
                         refs['video_qual_btns'].append(btn)
 
+    def _add_video_to_history(path, prompt):
+        entry = {'path': path, 'prompt': prompt}
+        state['history'].insert(0, entry)
+        if len(state['history']) > 10:
+            state['history'].pop()
+        refs['video_history_container'].clear()
+        with refs['video_history_container']:
+            for item in state['history']:
+                def load_video(p=item['path'], pr=item['prompt']):
+                    refs['video_placeholder'].set_visibility(False)
+                    refs['output_video'].classes(remove='hidden')
+                    refs['output_video'].set_source(p)
+                    state['last_output'] = p
+                    ui.notify(f'"{pr[:40]}..."' if len(pr) > 40 else f'"{pr}"', position='top', timeout=2000)
+                with ui.element('div').classes('neovak-history-item').on('click', load_video).style('width: 80px; height: 50px;'):
+                    ui.icon('play_circle', size='24px').style('color: var(--tube-warm);')
+
     async def do_generate_video():
         prompt = refs['video_prompt'].value
         if not prompt:
             ui.notify('Please describe the video', type='warning')
             return
+        if state['mode'] == 'img2video' and not state['i2v_source']:
+            ui.notify('Please upload a source image', type='warning')
+            return
 
         refs['video_gen_btn'].disable()
-        refs['video_gen_btn'].text = '⏳ Creating...'
+        refs['video_gen_btn'].text = 'Warming tubes...'
+        refs['video_gen_btn'].classes(add='neovak-warming')
         refs['video_progress'].set_visibility(True)
         refs['video_progress_text'].set_visibility(True)
-        
-        # Tube goes hot during generation
+
         refs['tube'].classes(remove='cold warm error', add='hot')
+        await asyncio.sleep(0.8)
+        refs['video_gen_btn'].text = 'Creating...'
+        refs['video_gen_btn'].classes(remove='neovak-warming')
 
         import time as time_module
         start_time = time_module.time()
@@ -1835,7 +2131,7 @@ def video_generation_panel():
                 progress = min(0.95, elapsed / estimated_total)
                 remaining = max(0, estimated_total - elapsed)
                 refs['video_progress'].set_value(progress)
-                refs['video_progress_text'].set_text(f'⏳ {int(elapsed)}s • ~{int(remaining)}s remaining')
+                refs['video_progress_text'].set_text(f'{int(elapsed)}s elapsed - ~{int(remaining)}s remaining')
                 await asyncio.sleep(0.5)
 
         progress_task = asyncio.create_task(update_progress())
@@ -1868,25 +2164,24 @@ def video_generation_panel():
                 refs['output_video'].classes(remove='hidden')
                 refs['output_video'].set_source(output_path)
                 refs['video_progress'].set_value(1.0)
-                refs['video_progress_text'].set_text(f'✓ Complete in {int(elapsed)}s')
+                refs['video_progress_text'].set_text(f'Complete in {int(elapsed)}s')
                 refs['video_seed_display'].set_text(f'Seed: {seed}')
                 refs['video_seed_display'].classes(remove='hidden')
                 ui.notify('Video created!', type='positive')
+                _add_video_to_history(output_path, prompt)
             else:
-                refs['video_progress_text'].set_text(f'✗ {status_msg}')
+                refs['video_progress_text'].set_text(f'{status_msg}')
                 ui.notify(status_msg, type='negative')
         except Exception as e:
             is_generating = False
-            refs['video_progress_text'].set_text(f'✗ Error')
+            refs['video_progress_text'].set_text('Error')
             ui.notify(str(e), type='negative')
-            # Tube flickers on error
             refs['tube'].classes(remove='hot warm', add='error')
         finally:
             is_generating = False
             progress_task.cancel()
             refs['video_gen_btn'].enable()
             refs['video_gen_btn'].text = 'Create'
-            # Tube returns to warm (ready) state
             refs['tube'].classes(remove='hot error', add='warm')
             await asyncio.sleep(2)
             refs['video_progress'].set_visibility(False)
@@ -1897,45 +2192,34 @@ def video_generation_panel():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def voice_generation_panel():
-    """Voice generation with Chatterbox TTS."""
-    # Discover speech models
+    """Voice generation with Chatterbox TTS — presets, emotion slider, quick texts, history."""
     all_models = discover_all_models()
     speech_models = all_models.get('speech', [])
-    
-    # Check if we have real models or using built-in
-    has_real_models = len(speech_models) > 0
+
     if not speech_models:
-        # Use built-in Chatterbox (downloads from HuggingFace on first use)
-        speech_models = [Model(name="Chatterbox TTS", path=Path("."), family="chatterbox", size_gb=2.0, 
-                              tier_required="lite", media_type="speech", 
+        speech_models = [Model(name="Chatterbox TTS", path=Path("."), family="chatterbox", size_gb=2.0,
+                              tier_required="lite", media_type="speech",
                               description="Expressive text-to-speech with emotion tags. Downloads automatically on first use (~2GB).")]
-    
-    state = {'speed': 1.0, 'voice_sample': None, 'model': speech_models[0]}
+
+    state = {'speed': 1.0, 'voice_sample': None, 'model': speech_models[0], 'emotion': 0.5, 'history': []}
     refs = {}
 
     with ui.column().classes('w-full max-w-2xl mx-auto gap-6 py-6'):
-        ui.label('🗣️ Voice Generation').classes('neovak-title')
+        ui.label('Voice Generation').classes('neovak-title')
+        ui.label(TAB_SUBTITLES['voice']).classes('neovak-tab-subtitle')
         ui.label('Text-to-speech with expression tags').classes('neovak-subtitle mb-4')
 
         with ui.card().classes('w-full neovak-card p-6'):
-            # ALWAYS show current model info
+            # Model info
             with ui.row().classes('items-center gap-2 mb-4'):
                 ui.label('MODEL').classes('neovak-section-header mb-0')
-                ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
-                    'The AI model used for speech synthesis. '
-                    'Chatterbox TTS is built-in and downloads automatically. '
-                    'Additional models can be added to your ComfyUI models folder.'
-                )
-            
             with ui.row().classes('items-center gap-3 p-3 rounded-lg').style('background: var(--surface-2);'):
                 ui.icon('record_voice_over', size='24px').classes('text-amber-500')
                 with ui.column().classes('gap-0.5 flex-1'):
                     if len(speech_models) > 1:
-                        # Multiple models - show dropdown
                         def on_speech_model_select(m):
                             state['model'] = m
                             refs['speech_model_btn'].text = m.name
-                        
                         with ui.dropdown_button(speech_models[0].name, auto_close=True).props('no-caps dropdown-icon=expand_more color=dark dense') as refs['speech_model_btn']:
                             for m in speech_models:
                                 with ui.item(on_click=lambda m=m: on_speech_model_select(m)).classes('neovak-model-item'):
@@ -1943,12 +2227,9 @@ def voice_generation_panel():
                                         with ui.row().classes('items-center gap-2'):
                                             ui.label(m.name).classes('text-white font-medium')
                                             ui.badge(m.family).props('color=primary outline dense')
-                                            if m.size_gb > 0:
-                                                ui.label(f'{m.size_gb:.1f}GB').classes('text-zinc-500 text-xs')
                                         if m.description:
                                             ui.label(m.description).classes('text-zinc-400 text-xs')
                     else:
-                        # Single model - show info directly
                         m = speech_models[0]
                         with ui.row().classes('items-center gap-2'):
                             ui.label(m.name).classes('text-white font-medium')
@@ -1957,7 +2238,29 @@ def voice_generation_panel():
                                 ui.label(f'~{m.size_gb:.1f}GB').classes('text-zinc-500 text-xs')
                         if m.description:
                             ui.label(m.description).classes('text-zinc-400 text-xs')
-            
+
+            # Voice presets gallery
+            voice_presets = get_voice_presets()
+            if voice_presets:
+                ui.label('VOICE PRESETS').classes('neovak-section-header mt-4')
+                with ui.row().classes('gap-2 flex-wrap'):
+                    for preset_name in voice_presets:
+                        def select_preset(name=preset_name):
+                            path = resolve_voice_preset(name)
+                            if path:
+                                state['voice_sample'] = path
+                                ui.notify(f'Voice: {name}', type='positive', position='top', timeout=1500)
+                        ui.button(preset_name, on_click=select_preset).props('flat dense no-caps size=sm').classes('neovak-style-chip')
+
+            # Quick text templates
+            ui.label('QUICK TEXTS').classes('neovak-section-header mt-4')
+            with ui.row().classes('gap-2 flex-wrap'):
+                for tpl_name, tpl_text in VOICE_QUICK_TEXTS.items():
+                    def fill_text(t=tpl_text, n=tpl_name):
+                        refs['text'].value = t
+                        ui.notify(f'Loaded: {n}', type='info', position='top', timeout=1500)
+                    ui.button(tpl_name, on_click=fill_text).props('flat dense no-caps size=sm').classes('neovak-style-chip')
+
             ui.label('TEXT').classes('neovak-section-header mt-4')
             refs['text'] = ui.textarea(placeholder='Enter text to speak... Use tags like [laugh], [sigh], [gasp] for expressions').classes('w-full neovak-prompt').props('outlined autogrow rows=4')
 
@@ -1968,19 +2271,31 @@ def voice_generation_panel():
                         refs['text'].value = (refs['text'].value or '') + f' [{t}]'
                     ui.button(f'[{tag}]', on_click=add_tag).props('flat dense size=sm').classes('text-zinc-400')
 
+            # Expression level (emotion slider)
+            with ui.column().classes('gap-1 mt-4'):
+                ui.label('EXPRESSION LEVEL').classes('neovak-section-header')
+                with ui.row().classes('neovak-slider-control items-center'):
+                    ui.label('Neutral').classes('neovak-control-hint')
+                    refs['emotion'] = ui.slider(min=0.0, max=1.0, value=0.5, step=0.05).classes('flex-1')
+                    ui.label('Expressive').classes('neovak-control-hint')
+                    refs['emotion_input'] = ui.number(value=0.5, min=0.0, max=1.0, step=0.05).classes('neovak-slider-value').props('dense borderless')
+                def sync_emo_s(e):
+                    refs['emotion_input'].value = float(e.args)
+                    state['emotion'] = float(e.args)
+                def sync_emo_i(e):
+                    val = max(0.0, min(1.0, float(e.value or 0.5)))
+                    refs['emotion'].value = val
+                    state['emotion'] = val
+                refs['emotion'].on('update:model-value', sync_emo_s)
+                refs['emotion_input'].on('update:model-value', sync_emo_i)
+
+            # Speed control
             with ui.column().classes('gap-1 mt-4'):
                 with ui.row().classes('items-center gap-1'):
                     ui.label('Speed').classes('neovak-control-name')
-                    ui.icon('help_outline', size='14px').classes('text-zinc-500 cursor-help').tooltip(
-                        'Playback speed of the generated speech. '
-                        '0.5x = slow and deliberate. '
-                        '1.0x = natural pace. '
-                        '2.0x = fast, energetic.'
-                    )
                 with ui.row().classes('neovak-slider-control'):
                     refs['speed'] = ui.slider(min=0.5, max=2.0, value=1.0, step=0.1).classes('flex-1')
                     refs['speed_input'] = ui.number(value=1.0, min=0.25, max=3.0, step=0.1).classes('neovak-slider-value').props('dense borderless')
-                
                 def sync_speed_from_slider(e):
                     refs['speed_input'].value = float(e.args)
                 def sync_speed_from_input(e):
@@ -1990,7 +2305,7 @@ def voice_generation_panel():
                 refs['speed_input'].on('update:model-value', sync_speed_from_input)
                 ui.label('1.0x=natural, type up to 3x').classes('neovak-control-hint')
 
-        refs['voice_gen_btn'] = ui.button('🎤 Generate Voice', on_click=lambda: do_generate_voice()).classes('w-full neovak-btn-primary')
+        refs['voice_gen_btn'] = ui.button('Generate Voice', on_click=lambda: do_generate_voice()).classes('w-full neovak-btn-primary')
 
         with ui.column().classes('w-full gap-2'):
             refs['voice_progress'] = ui.linear_progress(value=0, show_value=False).classes('w-full neovak-progress')
@@ -1999,6 +2314,11 @@ def voice_generation_panel():
 
         refs['audio_output'] = ui.audio('').classes('w-full hidden')
 
+        # Voice history
+        with ui.column().classes('w-full'):
+            ui.label('HISTORY').classes('neovak-section-header')
+            refs['voice_history_row'] = ui.column().classes('gap-2 w-full')
+
     async def do_generate_voice():
         text = refs['text'].value
         if not text:
@@ -2006,8 +2326,14 @@ def voice_generation_panel():
             return
 
         refs['voice_gen_btn'].disable()
+        refs['voice_gen_btn'].text = 'Warming tubes...'
+        refs['voice_gen_btn'].classes(add='neovak-warming')
         refs['voice_progress'].set_visibility(True)
         refs['voice_status'].set_text('Generating speech...')
+
+        await asyncio.sleep(0.8)
+        refs['voice_gen_btn'].text = 'Creating...'
+        refs['voice_gen_btn'].classes(remove='neovak-warming')
 
         try:
             output_path, status = await asyncio.get_event_loop().run_in_executor(
@@ -2021,16 +2347,29 @@ def voice_generation_panel():
             if output_path:
                 refs['audio_output'].set_source(output_path)
                 refs['audio_output'].classes(remove='hidden')
-                refs['voice_status'].set_text('✓ Voice generated!')
+                refs['voice_status'].set_text('Voice generated!')
                 ui.notify('Voice generated!', type='positive')
+
+                preview = text[:40] + '...' if len(text) > 40 else text
+                state['history'].insert(0, {'path': output_path, 'text': preview})
+                if len(state['history']) > 10:
+                    state['history'].pop()
+                with refs['voice_history_row']:
+                    def play_clip(p=output_path):
+                        refs['audio_output'].set_source(p)
+                        refs['audio_output'].classes(remove='hidden')
+                    with ui.row().classes('items-center gap-2 p-2 rounded').style('background: var(--surface-2);'):
+                        ui.button(icon='play_arrow', on_click=play_clip).props('flat dense').style('color: var(--tube-warm);')
+                        ui.label(preview).classes('text-zinc-400 text-sm flex-1')
             else:
-                refs['voice_status'].set_text(f'✗ {status}')
+                refs['voice_status'].set_text(f'{status}')
                 ui.notify(status, type='negative')
         except Exception as e:
-            refs['voice_status'].set_text(f'✗ Error')
+            refs['voice_status'].set_text('Error')
             ui.notify(str(e), type='negative')
         finally:
             refs['voice_gen_btn'].enable()
+            refs['voice_gen_btn'].text = 'Generate Voice'
             refs['voice_progress'].set_visibility(False)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2060,6 +2399,7 @@ def music_generation_panel():
 
     with ui.column().classes('w-full max-w-2xl mx-auto gap-6 py-6'):
         ui.label('Music Generation').classes('neovak-title')
+        ui.label(TAB_SUBTITLES['music']).classes('neovak-tab-subtitle')
         ui.label('Create full songs from style tags + lyrics with ACE-Step 1.5').classes('neovak-subtitle mb-4')
 
         # ACE-Step status bar
@@ -2607,83 +2947,89 @@ def music_generation_panel():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def sfx_generation_panel():
-    """Sound effects generation panel using AudioGen."""
-    
+    """Sound effects generation — sound board, quick prompts by category, 3-variation generator."""
+
     state = {
         'duration': 2.0,
         'category': None,
         'variations': 1,
+        'soundboard': [],
     }
     refs = {}
-    
-    # Check SFX model status
+
     sfx_status = get_sfx_model_status()
 
     with ui.column().classes('w-full max-w-2xl mx-auto gap-6 py-6'):
-        ui.label('🔊 Sound Effects').classes('neovak-title')
+        ui.label('Sound Effects').classes('neovak-title')
+        ui.label(TAB_SUBTITLES['sfx']).classes('neovak-tab-subtitle')
         ui.label('Generate sound effects from text descriptions').classes('neovak-subtitle mb-4')
-        
-        # Show install hint if not available
+
         if not sfx_status['available']:
             with ui.card().classes('w-full neovak-card p-6 border-amber-500/30'):
-                ui.label('⚠️ AudioGen Not Installed').classes('text-amber-400 font-medium mb-2')
+                ui.label('AudioGen Not Installed').classes('text-amber-400 font-medium mb-2')
                 ui.label('Sound effects generation requires AudioCraft or AudioLDM2.').classes('text-zinc-400 text-sm mb-3')
                 with ui.element('pre').classes('bg-zinc-900 p-3 rounded text-xs text-zinc-300 overflow-x-auto'):
                     ui.label('pip install audiocraft  # Recommended')
                 ui.label('After installing, restart NeoVak.').classes('text-zinc-500 text-xs mt-2')
 
         with ui.card().classes('w-full neovak-card p-6'):
-            # Category inspiration buttons
+            # Category selector with quick prompts
             ui.label('CATEGORY').classes('neovak-section-header')
-            
-            with ui.row().classes('gap-2 flex-wrap mb-4'):
+            with ui.row().classes('gap-2 flex-wrap mb-2'):
                 for cat_id, cat_info in SFX_CATEGORIES.items():
                     def select_category(c=cat_id, info=cat_info):
                         state['category'] = c
-                        # Show random example from category
                         import random
                         example = random.choice(info['examples'])
                         refs['sfx_prompt'].value = example
-                        ui.notify(f'Try: "{example}"', type='info')
-                    
-                    ui.button(
-                        cat_info['label'],
-                        on_click=select_category
-                    ).props('flat dense size=sm').classes('text-zinc-400 hover:text-amber-400')
-            
-            # Main prompt input
+                        _update_quick_prompts(c)
+                        ui.notify(f'Category: {info["label"]}', type='info')
+                    ui.button(cat_info['label'], on_click=select_category).props('flat dense size=sm').classes('text-zinc-400 hover:text-amber-400')
+
+            # Quick prompts by category (populated dynamically)
+            refs['quick_prompts_row'] = ui.row().classes('gap-2 flex-wrap mb-3')
+
+            def _update_quick_prompts(cat_key):
+                refs['quick_prompts_row'].clear()
+                prompts = SFX_QUICK_PROMPTS.get(cat_key, [])
+                if not prompts:
+                    cat_name_map = {c: info['label'] for c, info in SFX_CATEGORIES.items()}
+                    display_name = cat_name_map.get(cat_key, cat_key)
+                    prompts = SFX_QUICK_PROMPTS.get(display_name, [])
+                with refs['quick_prompts_row']:
+                    for p in prompts:
+                        def fill_prompt(prompt=p):
+                            refs['sfx_prompt'].value = prompt
+                        ui.button(p, on_click=fill_prompt).props('flat dense no-caps size=sm').classes('neovak-style-chip')
+
+            # Show default quick prompts
+            for cat_name, prompts in SFX_QUICK_PROMPTS.items():
+                with refs['quick_prompts_row']:
+                    for p in prompts[:2]:
+                        def fill_prompt(prompt=p):
+                            refs['sfx_prompt'].value = prompt
+                        ui.button(p, on_click=fill_prompt).props('flat dense no-caps size=sm').classes('neovak-style-chip')
+                break
+
             ui.label('DESCRIPTION').classes('neovak-section-header')
             refs['sfx_prompt'] = ui.textarea(
-                placeholder='Describe the sound... e.g., "thunder rolling in the distance" or "footsteps on wooden floor"'
+                placeholder='Describe the sound... e.g., "thunder rolling in the distance"'
             ).classes('w-full neovak-prompt').props('outlined autogrow rows=2')
-            
-            # Quick examples row
-            with ui.row().classes('gap-2 flex-wrap mt-2'):
-                quick_examples = ['door slam', 'rain on roof', 'crowd cheering', 'laser beam', 'clock ticking']
-                for ex in quick_examples:
-                    ui.button(
-                        ex,
-                        on_click=lambda e=ex: refs['sfx_prompt'].set_value(e)
-                    ).props('flat dense size=sm').classes('text-zinc-500 text-xs')
 
-            # Duration selection
+            # Duration
             ui.label('DURATION').classes('neovak-section-header mt-4')
-            refs['duration_btns'] = []
+            refs['sfx_dur_btns'] = []
             with ui.row().classes('gap-2'):
                 for i, (label, dur, desc) in enumerate(SFX_DURATION_PRESETS):
                     def select_dur(d=dur, idx=i):
                         state['duration'] = d
-                        for j, btn in enumerate(refs['duration_btns']):
+                        for j, btn in enumerate(refs['sfx_dur_btns']):
                             btn.props('color=primary' if j == idx else 'color=dark')
-                    
                     is_default = (dur == 2.0)
-                    btn = ui.button(
-                        label,
-                        on_click=select_dur
-                    ).props(f'dense no-caps {"color=primary" if is_default else "color=dark"}')
+                    btn = ui.button(label, on_click=select_dur).props(f'dense no-caps {"color=primary" if is_default else "color=dark"}')
                     btn.tooltip(desc)
-                    refs['duration_btns'].append(btn)
-            
+                    refs['sfx_dur_btns'].append(btn)
+
             # Style modifiers
             ui.label('STYLE').classes('neovak-section-header mt-4')
             with ui.row().classes('gap-2 flex-wrap'):
@@ -2692,39 +3038,47 @@ def sfx_generation_panel():
                         current = refs['sfx_prompt'].value or ''
                         if t not in current.lower():
                             refs['sfx_prompt'].value = f'{current}, {t}' if current else t
-                    
                     btn = ui.button(tag, on_click=add_style).props('flat dense size=sm').classes('text-zinc-400')
                     btn.tooltip(desc)
 
             # Variations selector
             ui.label('VARIATIONS').classes('neovak-section-header mt-4')
+            refs['sfx_var_btns'] = []
             with ui.row().classes('gap-2 items-center'):
                 for n in [1, 2, 3, 4]:
                     def set_var(v=n):
                         state['variations'] = v
-                    ui.button(
-                        str(n),
-                        on_click=set_var
-                    ).props(f'dense {"color=primary" if n == 1 else "color=dark"}').classes('w-10')
-                ui.label('Generate multiple variations at once').classes('text-zinc-500 text-xs ml-2')
+                        for j, btn in enumerate(refs['sfx_var_btns']):
+                            btn.props('color=primary' if j + 1 == v else 'color=dark')
+                    btn = ui.button(str(n), on_click=set_var).props(f'dense {"color=primary" if n == 1 else "color=dark"}').classes('w-10')
+                    refs['sfx_var_btns'].append(btn)
+                ui.label('Generate multiple variations').classes('text-zinc-500 text-xs ml-2')
+
+            # Generate 3 Variations quick button
+            def do_gen_3():
+                state['variations'] = 3
+                for j, btn in enumerate(refs['sfx_var_btns']):
+                    btn.props('color=primary' if j + 1 == 3 else 'color=dark')
+                do_generate_sfx()
+            ui.button('Generate 3 Variations', on_click=lambda: do_gen_3()).props('flat dense no-caps').classes('neovak-enhance-btn mt-2').tooltip('Quick: generate 3 versions')
 
         # Generate button
-        refs['sfx_gen_btn'] = ui.button(
-            '🔊 Generate Sound Effect',
-            on_click=lambda: do_generate_sfx()
-        ).classes('w-full neovak-btn-primary')
-        
+        refs['sfx_gen_btn'] = ui.button('Generate Sound Effect', on_click=lambda: do_generate_sfx()).classes('w-full neovak-btn-primary')
         if not sfx_status['available']:
             refs['sfx_gen_btn'].disable()
 
-        # Progress and status
         with ui.column().classes('w-full gap-2'):
             refs['sfx_progress'] = ui.linear_progress(value=0, show_value=False).classes('w-full neovak-progress')
             refs['sfx_progress'].set_visibility(False)
             refs['sfx_status'] = ui.label('').classes('text-zinc-400 text-sm')
 
-        # Output audio players (can show multiple variations)
+        # Output audio players
         refs['sfx_outputs'] = ui.column().classes('w-full gap-3')
+
+        # Sound Board — persistent grid of generated sounds
+        with ui.column().classes('w-full'):
+            ui.label('SOUND BOARD').classes('neovak-section-header')
+            refs['soundboard_grid'] = ui.grid(columns=3).classes('gap-2 w-full')
 
     async def do_generate_sfx():
         prompt = refs['sfx_prompt'].value
@@ -2733,9 +3087,15 @@ def sfx_generation_panel():
             return
 
         refs['sfx_gen_btn'].disable()
+        refs['sfx_gen_btn'].text = 'Warming tubes...'
+        refs['sfx_gen_btn'].classes(add='neovak-warming')
         refs['sfx_progress'].set_visibility(True)
         refs['sfx_status'].set_text('Generating sound effect...')
         refs['sfx_outputs'].clear()
+
+        await asyncio.sleep(0.8)
+        refs['sfx_gen_btn'].text = 'Creating...'
+        refs['sfx_gen_btn'].classes(remove='neovak-warming')
 
         def progress_cb(pct, msg):
             refs['sfx_progress'].set_value(pct / 100)
@@ -2759,24 +3119,34 @@ def sfx_generation_panel():
                             with ui.row().classes('items-center gap-3'):
                                 ui.label(f'Variation {i+1}').classes('text-amber-400 text-sm font-medium')
                                 ui.audio(path).classes('flex-1')
-                                # Download button
-                                ui.button(
-                                    icon='download',
-                                    on_click=lambda p=path: ui.download(p)
-                                ).props('flat dense').classes('text-zinc-400')
-                
-                refs['sfx_status'].set_text(f'✓ Generated {len(output_paths)} sound effect(s)!')
+                                ui.button(icon='download', on_click=lambda p=path: ui.download(p)).props('flat dense').classes('text-zinc-400')
+
+                # Add to sound board
+                for path in output_paths:
+                    short_desc = prompt[:20] + ('...' if len(prompt) > 20 else '')
+                    state['soundboard'].append({'path': path, 'desc': short_desc})
+                    with refs['soundboard_grid']:
+                        async def play_sound(p=path):
+                            await ui.run_javascript(f'''
+                                new Audio("{p}").play();
+                            ''')
+                        with ui.element('div').classes('neovak-soundboard-btn').on('click', play_sound):
+                            ui.icon('play_circle', size='20px').style('color: var(--tube-warm);')
+                            ui.label(short_desc).classes('text-zinc-400 text-xs mt-1')
+
+                refs['sfx_status'].set_text(f'Generated {len(output_paths)} sound effect(s)!')
                 ui.notify('Sound effects generated!', type='positive')
             else:
-                refs['sfx_status'].set_text(f'✗ {status}')
+                refs['sfx_status'].set_text(f'{status}')
                 ui.notify(status, type='negative')
-        
+
         except Exception as e:
-            refs['sfx_status'].set_text(f'✗ Error: {str(e)}')
+            refs['sfx_status'].set_text(f'Error: {str(e)}')
             ui.notify(str(e), type='negative')
-        
+
         finally:
             refs['sfx_gen_btn'].enable()
+            refs['sfx_gen_btn'].text = 'Generate Sound Effect'
             refs['sfx_progress'].set_visibility(False)
 
 
@@ -2806,11 +3176,11 @@ def main_page():
 
         with ui.column().classes('w-full max-w-5xl mx-auto px-4 flex-1'):
             with ui.tabs().classes('w-full').props('align=center') as tabs:
-                image_tab = ui.tab('Image', icon='image')
-                video_tab = ui.tab('Video', icon='movie')
-                voice_tab = ui.tab('Voice', icon='mic')
-                sfx_tab = ui.tab('SFX', icon='graphic_eq')
-                music_tab = ui.tab('Music', icon='music_note')
+                image_tab = ui.tab('Image Generation', icon='image')
+                video_tab = ui.tab('Video Generation', icon='movie')
+                voice_tab = ui.tab('Voice Generation', icon='mic')
+                sfx_tab = ui.tab('Sound Effects', icon='graphic_eq')
+                music_tab = ui.tab('Music Generation', icon='music_note')
 
             with ui.tab_panels(tabs, value=image_tab).classes('w-full flex-1'):
                 with ui.tab_panel(image_tab):
