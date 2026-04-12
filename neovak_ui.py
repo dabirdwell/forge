@@ -2190,8 +2190,25 @@ def video_generation_panel():
                     refs['output_video'].set_source(p)
                     state['last_output'] = p
                     ui.notify(f'"{pr[:40]}..."' if len(pr) > 40 else f'"{pr}"', position='top', timeout=2000)
-                with ui.element('div').classes('neovak-history-item').on('click', load_video).style('width: 80px; height: 50px;'):
-                    ui.icon('play_circle', size='24px').style('color: var(--tube-warm);')
+
+                def continue_from_video(p=item['path'], pr=item['prompt']):
+                    state['mode'] = 'chain'
+                    for mid, btn in refs['video_mode_btns'].items():
+                        btn.classes(add='active' if mid == 'chain' else '', remove='' if mid == 'chain' else 'active')
+                    refs['i2v_section'].set_visibility(False)
+                    refs['chain_section'].set_visibility(True)
+                    state['chain_continue_from'] = p
+                    state['chain_segments'] = [{'prompt': '', 'seed': -1}]
+                    refs['chain_continue_label'].set_text(f'Continuing from: {pr[:50]}')
+                    refs['chain_continue_label'].classes(remove='hidden')
+                    _rebuild_chain_segments()
+                    _update_chain_info()
+                    ui.notify('Chain mode: add prompts to extend this video', type='info')
+
+                with ui.column().classes('neovak-history-item items-center gap-1').style('width: 80px; min-height: 50px; cursor: pointer;'):
+                    with ui.element('div').on('click', load_video).style('display: flex; align-items: center; justify-content: center; width: 100%; height: 40px;'):
+                        ui.icon('play_circle', size='24px').style('color: var(--tube-warm);')
+                    ui.button(icon='add_link', on_click=continue_from_video).props('flat dense round size=xs').classes('neovak-transport-btn').tooltip('Continue from this').style('font-size: 0.6rem;')
 
     async def do_generate_video():
         prompt = refs['video_prompt'].value
@@ -2235,19 +2252,37 @@ def video_generation_panel():
         state['last_seed'] = seed
 
         try:
-            output_path, status_msg = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: generate_video(
-                    prompt_text=prompt,
-                    model_name=state['model'].name,
-                    width=state['width'],
-                    height=state['height'],
-                    num_frames=state['num_frames'],
-                    steps=state['steps'],
-                    cfg=state['cfg'],
-                    seed=seed,
+            if state['mode'] == 'img2video' and state['i2v_source']:
+                i2v_strength = refs['i2v_strength'].value
+                output_path, status_msg = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: generate_video_from_image(
+                        prompt_text=prompt,
+                        model_name=state['model'].name,
+                        image_path=state['i2v_source'],
+                        width=state['width'],
+                        height=state['height'],
+                        num_frames=state['num_frames'],
+                        steps=state['steps'],
+                        cfg=state['cfg'],
+                        seed=seed,
+                        strength=i2v_strength,
+                    )
                 )
-            )
+            else:
+                output_path, status_msg = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: generate_video(
+                        prompt_text=prompt,
+                        model_name=state['model'].name,
+                        width=state['width'],
+                        height=state['height'],
+                        num_frames=state['num_frames'],
+                        steps=state['steps'],
+                        cfg=state['cfg'],
+                        seed=seed,
+                    )
+                )
 
             is_generating = False
             elapsed = time_module.time() - start_time
@@ -2280,6 +2315,104 @@ def video_generation_panel():
             await asyncio.sleep(2)
             refs['video_progress'].set_visibility(False)
             refs['video_progress_text'].set_visibility(False)
+
+    async def do_generate_chain():
+        valid_segments = [s for s in state['chain_segments'] if s.get('prompt', '').strip()]
+        if not valid_segments:
+            ui.notify('Add prompts to at least one segment', type='warning')
+            return
+
+        refs['chain_gen_btn'].disable()
+        refs['chain_gen_btn'].text = 'Warming tubes...'
+        refs['chain_gen_btn'].classes(add='neovak-warming')
+        refs['chain_progress'].set_visibility(True)
+        refs['chain_progress_text'].set_visibility(True)
+        refs['chain_progress'].set_value(0)
+
+        refs['tube'].classes(remove='cold warm error', add='hot')
+        await asyncio.sleep(0.8)
+        refs['chain_gen_btn'].text = 'Generating chain...'
+        refs['chain_gen_btn'].classes(remove='neovak-warming')
+
+        import time as time_module
+        start_time = time_module.time()
+
+        def chain_progress_cb(pct, msg):
+            try:
+                refs['chain_progress'].set_value(pct / 100.0)
+                refs['chain_progress_text'].set_text(msg)
+            except Exception:
+                pass
+
+        try:
+            continue_from = state.get('chain_continue_from')
+
+            if continue_from:
+                final_path, status_msg, new_clips = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: continue_video_chain(
+                        existing_video_path=continue_from,
+                        segments=valid_segments,
+                        model_name=state['model'].name,
+                        width=state['width'], height=state['height'],
+                        num_frames=state['num_frames'],
+                        steps=state['steps'], cfg=state['cfg'],
+                        progress_callback=chain_progress_cb,
+                    )
+                )
+                all_clips = [continue_from] + new_clips
+            else:
+                final_path, status_msg, clips = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: generate_video_chain(
+                        segments=valid_segments,
+                        model_name=state['model'].name,
+                        width=state['width'], height=state['height'],
+                        num_frames=state['num_frames'],
+                        steps=state['steps'], cfg=state['cfg'],
+                        progress_callback=chain_progress_cb,
+                    )
+                )
+                all_clips = clips
+
+            elapsed = time_module.time() - start_time
+            state['chain_clips'] = all_clips
+
+            if final_path:
+                state['last_output'] = final_path
+                refs['video_placeholder'].set_visibility(False)
+                refs['output_video'].classes(remove='hidden')
+                refs['output_video'].set_source(final_path)
+                refs['chain_progress'].set_value(1.0)
+                refs['chain_progress_text'].set_text(f'Chain complete in {int(elapsed)}s — {status_msg}')
+                ui.notify('Video chain created!', type='positive')
+                _add_video_to_history(final_path, f'[Chain {len(all_clips)}seg] {valid_segments[0]["prompt"][:30]}')
+
+                refs['chain_output_area'].set_visibility(True)
+                refs['chain_output_area'].clear()
+                with refs['chain_output_area']:
+                    ui.label('INDIVIDUAL CLIPS').classes('neovak-section-header')
+                    with ui.row().classes('gap-3 flex-wrap'):
+                        for ci, clip_path in enumerate(all_clips):
+                            with ui.card().classes('neovak-card p-2').style('width: 200px;'):
+                                ui.label(f'Clip {ci + 1}').classes('text-xs font-medium').style('color: var(--text-secondary);')
+                                clip_video = ui.video(clip_path).classes('w-full').props('controls loop').style('max-height: 120px;')
+                _rebuild_chain_segments()
+            else:
+                refs['chain_progress_text'].set_text(status_msg)
+                ui.notify(status_msg, type='negative')
+
+        except Exception as e:
+            refs['chain_progress_text'].set_text('Error')
+            ui.notify(str(e), type='negative')
+            refs['tube'].classes(remove='hot warm', add='error')
+        finally:
+            refs['chain_gen_btn'].enable()
+            refs['chain_gen_btn'].text = 'Generate Chain'
+            refs['tube'].classes(remove='hot error', add='warm')
+            await asyncio.sleep(2)
+            refs['chain_progress'].set_visibility(False)
+            refs['chain_progress_text'].set_visibility(False)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VOICE GENERATION PANEL
