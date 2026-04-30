@@ -152,3 +152,6 @@ Built with [NiceGUI](https://nicegui.io) and [ComfyUI](https://github.com/comfya
 - [[CHANGELOG]]
 - [[NeoVak_Project]]
 - [[Foundation Canon]]
+---
+
+<p align="center"><em>Æ</em></p>
